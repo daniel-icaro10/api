@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIS SMPE</title>
+<link rel="icon" href="/static/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-painel" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></symbol>
+  <symbol id="i-migracao" viewBox="0 0 24 24"><path d="M16 3l4 4-4 4"/><path d="M20 7H8"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h12"/></symbol>
+  <symbol id="i-escolas" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M10 21v-5h4v5"/></symbol>
+  <symbol id="i-remessas" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 18v-6"/><path d="M9 15l3-3 3 3"/></symbol>
+  <symbol id="i-relatorios" viewBox="0 0 24 24"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+  <symbol id="i-orcamento" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M7 15h4"/></symbol>
+  <symbol id="i-bases" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+  <symbol id="i-busca" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-critica" viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+</svg>
+<aside class="side">
+  <div class="brand"><img src="/static/logo.png" alt="SIS SMPE - Migração de estudantes SMTT"></div>
+  <nav id="nav">
+    <div class="nav-label">Visão geral</div>
+    <a href="#/painel" data-r="painel"><svg class="i"><use href="#i-painel"/></svg>Painel</a>
+    <div class="nav-label">Operação</div>
+    <a href="#/migracao" data-r="migracao"><svg class="i"><use href="#i-migracao"/></svg>Migração</a>
+    <a href="#/remessas" data-r="remessas"><svg class="i"><use href="#i-remessas"/></svg>Remessas SMTT</a>
+    <a href="#/critica" data-r="critica"><svg class="i"><use href="#i-critica"/></svg>Criticar remessa</a>
+    <a href="#/relatorios" data-r="relatorios"><svg class="i"><use href="#i-relatorios"/></svg>Relatórios</a>
+    <a href="#/orcamento" data-r="orcamento"><svg class="i"><use href="#i-orcamento"/></svg>Orçamento</a>
+    <div class="nav-label">Cadastros</div>
+    <a href="#/escolas" data-r="escolas"><svg class="i"><use href="#i-escolas"/></svg>Escolas</a>
+    <a href="#/bases" data-r="bases"><svg class="i"><use href="#i-bases"/></svg>Bases e importação</a>
+  </nav>
+  <div class="side-foot"><span class="dot"></span>Dados locais · uso restrito (LGPD)</div>
+</aside>
+<div class="main">
+  <header class="top">
+    <button class="icon-btn only-mobile" id="menuBtn" aria-label="Menu">☰</button>
+    <div><h1 id="title">Painel</h1><div class="crumb" id="crumb">SIS SMPE</div></div>
+    <form class="search" id="buscaForm"><svg class="i"><use href="#i-busca"/></svg><input id="buscaInput" placeholder="Localizar estudante por nome ou CPF…" autocomplete="off"></form>
+  </header>
+  <section id="view" class="view"></section>
+</div>
+
+<div class="drawer" id="drawer" aria-hidden="true"><div class="drawer-panel" id="drawerPanel"></div></div>
+<dialog id="modal"><div id="modalBody"></div></dialog>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

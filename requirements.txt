@@ -1,0 +1,5 @@
+truststore
+openpyxl
+fastapi
+uvicorn
+python-multipart
