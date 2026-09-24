@@ -72,4 +72,4 @@ Na importação, o sistema corrige automaticamente os nomes com acentuação cor
 
 ## Dados
 
-O banco fica em `data/smpe.db` (SQLite). As bases têm dados pessoais de estudantes menores de idade. O servidor atende só este computador (127.0.0.1) e não tem login. Não exponha o sistema na rede sem antes incluir autenticação.
+O banco fica em `data/smpe.db` (SQLite). Quando a variável `DATABASE_URL` está definida (no Render, por exemplo), o sistema usa esse Postgres no lugar do SQLite. As bases têm dados pessoais de estudantes menores de idade. O servidor atende só este computador (127.0.0.1) e não tem login. Não exponha o sistema na rede sem antes incluir autenticação.

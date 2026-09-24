@@ -1,5 +1,8 @@
-"""Banco SQLite do SIS SMPE."""
+"""Banco do SIS SMPE: SQLite local ou Postgres (quando DATABASE_URL estiver definida, ex.: Render)."""
+import os
+import re
 import sqlite3
+import threading
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "smpe.db"
@@ -90,7 +93,94 @@ CREATE TABLE IF NOT EXISTS importacoes (
 """
 
 
-def connect() -> sqlite3.Connection:
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# horario local de Sao Luis (UTC-3); o servidor do Render roda em UTC
+AGORA_PG = "to_char(now() AT TIME ZONE 'America/Fortaleza', 'YYYY-MM-DD HH24:MI:SS')"
+AGORA_SQLITE = "datetime('now','localtime')"
+
+
+def _schema_pg() -> str:
+    s = SCHEMA.replace("id INTEGER PRIMARY KEY", "id SERIAL PRIMARY KEY")
+    s = s.replace(AGORA_SQLITE, AGORA_PG).replace(" BLOB ", " BYTEA ").replace(" REAL ", " DOUBLE PRECISION ")
+    return re.sub(r"INSERT OR IGNORE INTO (.*?);", r"INSERT INTO \1 ON CONFLICT DO NOTHING;", s)
+
+
+class Row(tuple):
+    """Linha acessivel por indice e por nome, como sqlite3.Row."""
+
+    def __new__(cls, values, cols, idx):
+        r = super().__new__(cls, values)
+        r._cols, r._idx = cols, idx
+        return r
+
+    def __getitem__(self, k):
+        return tuple.__getitem__(self, self._idx[k] if isinstance(k, str) else k)
+
+    def keys(self):
+        return self._cols
+
+
+def _row_factory(cur):
+    cols = [c.name for c in cur.description or []]
+    idx = {c: i for i, c in enumerate(cols)}
+    return lambda values: Row(values, cols, idx)
+
+
+def _sql_pg(sql: str, has_params: bool) -> str:
+    sql = sql.replace(AGORA_SQLITE, AGORA_PG)
+    if has_params:
+        sql = sql.replace("%", "%%").replace("?", "%s")
+    return sql
+
+
+class PgConnection:
+    """Adapta o psycopg a interface do sqlite3 usada no sistema (placeholders ?, `with con:` = transacao)."""
+
+    def __init__(self, con):
+        self._con = con
+        self._tx = []
+
+    def execute(self, sql: str, params=None):
+        return self._con.execute(_sql_pg(sql, params is not None), params)
+
+    def executemany(self, sql: str, seq):
+        cur = self._con.cursor()
+        cur.executemany(_sql_pg(sql, True), seq)
+        return cur
+
+    def __enter__(self):
+        tx = self._con.transaction()
+        tx.__enter__()
+        self._tx.append(tx)
+        return self
+
+    def __exit__(self, *exc):
+        return self._tx.pop().__exit__(*exc)
+
+    def close(self):
+        self._con.close()
+
+
+_schema_ok = False
+_schema_lock = threading.Lock()
+
+
+def _connect_pg() -> PgConnection:
+    global _schema_ok
+    import psycopg
+
+    con = PgConnection(psycopg.connect(DATABASE_URL, autocommit=True, row_factory=_row_factory))
+    if not _schema_ok:
+        with _schema_lock:
+            if not _schema_ok:
+                con.execute(_schema_pg())
+                _schema_ok = True
+    return con
+
+
+def connect():
+    if DATABASE_URL:
+        return _connect_pg()
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=60, check_same_thread=False)
     con.row_factory = sqlite3.Row

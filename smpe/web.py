@@ -48,7 +48,7 @@ def painel():
                   for b in ("geduc", "censo", "smtt", "status_alunos")}
     ult = {r["base"]: r["importado_em"] for r in con.execute(
         "SELECT base, MAX(importado_em) importado_em FROM importacoes GROUP BY base")}
-    lotes = con.execute("SELECT COUNT(*), COALESCE(SUM(n_alunos),0) FROM lotes").fetchone()
+    lotes = con.execute("SELECT COUNT(*), CAST(COALESCE(SUM(n_alunos),0) AS INTEGER) FROM lotes").fetchone()
     return {"totais": tot, "escolas": escolas, "bases": bases_info, "ultima_importacao": ult,
             "lotes": {"n": lotes[0], "alunos": lotes[1]}}
 
@@ -114,7 +114,8 @@ def escolas_geduc(sugerir_para: str = ""):
     """Escolas existentes no GEDUC (para vincular o cadastro), ordenadas por semelhanca com `sugerir_para`."""
     con = db.connect()
     rows = [dict(r) for r in con.execute(
-        "SELECT escola, inep_escola, COUNT(*) alunos FROM geduc GROUP BY escola_norm ORDER BY escola")]
+        "SELECT MIN(escola) escola, MIN(inep_escola) inep_escola, COUNT(*) alunos FROM geduc GROUP BY escola_norm "
+        "ORDER BY 1")]
     if sugerir_para:
         alvo = norm_nome(sugerir_para)
         for r in rows:

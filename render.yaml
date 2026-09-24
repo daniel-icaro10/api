@@ -8,3 +8,13 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sis-smpe-db
+          property: connectionString
+
+databases:
+  - name: sis-smpe-db
+    plan: free
+    databaseName: smpe
+    user: smpe

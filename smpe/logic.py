@@ -250,11 +250,12 @@ def salvar_lote(con, escola, remessa: dict) -> int:
                       (escola["id"],)).fetchone()[0]
     nome = f"INST_{so_digitos(escola['cod_smtt']).zfill(4)}_REM_{seq:02d}.txt"
     with con:
-        cur = con.execute("INSERT INTO lotes (escola_id, num_remessa, n_alunos, arquivo, conteudo) VALUES (?,?,?,?,?)",
-                          (escola["id"], seq, len(validos), nome, conteudo))
+        lid = con.execute("""INSERT INTO lotes (escola_id, num_remessa, n_alunos, arquivo, conteudo)
+                             VALUES (?,?,?,?,?) RETURNING id""",
+                          (escola["id"], seq, len(validos), nome, conteudo)).fetchone()[0]
         con.executemany("INSERT INTO lote_alunos (lote_id, id_aluno, nome, cpf) VALUES (?,?,?,?)",
-                        [(cur.lastrowid, i["id_aluno"], i["aluno"], i["cpf"]) for i in validos])
-    return cur.lastrowid
+                        [(lid, i["id_aluno"], i["aluno"], i["cpf"]) for i in validos])
+    return lid
 
 
 # ---------------------------------------------------------------- orcamento (aba ORCAMENTO)
