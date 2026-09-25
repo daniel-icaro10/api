@@ -35,6 +35,7 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 | Botões CPF divergente / com CPF / sem CPF / duplicado / mãe não informada | Abas de filtro do Matriculado |
 | REL_SEM_CPF / REL_SEM_MAE / REL_SIMPLIFICADA | Relatórios para imprimir (o simplificado mostra o CPF mascarado) |
 | ALUNO + ENTRADA + NUM.CARACT | Remessa SMTT: arquivo `INST_<cód>_REM_<nº>.txt` em UTF-8 com BOM, 21 campos, 375 colunas |
+| Relação simplificada de estudantes (relatório oficial da SMTT) | Remessas → **Baixar PDF**: nome, CPF, nascimento e mãe de cada aluno da remessa, no layout oficial, com a logo do sistema e o código de verificação (SHA-1 do TXT) no rodapé |
 | AlunoCriticaUtf8.exe (validador oficial SMPE) | Criticar remessa: mesmas críticas de 0 a 17 e regras A a C, com relatório `CRITICA_*.txt`, mais a crítica 18 (mãe com nome e sobrenome) |
 | ORÇAMENTO | Orçamento (só administrador): migrados com CPF × preço unitário + peticionamento − desconto |
 | GEDUC, CENSO, SMTT, ALUNOS_POR_STATUS | Bases e importação |

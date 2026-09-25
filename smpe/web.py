@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import critica, db, importer, logic
+from . import critica, db, importer, logic, pdf
 from .util import norm_cpf, norm_nome, so_digitos
 
 app = FastAPI(title="SIS SMPE")
@@ -714,6 +714,18 @@ def baixar_lote(lid: int, u: dict = Depends(usuario)):
                     headers={"Content-Disposition": f'attachment; filename="{r["arquivo"]}"'})
 
 
+@app.get("/api/lotes/{lid}/pdf")
+def pdf_lote(lid: int, u: dict = Depends(usuario)):
+    """Relacao simplificada dos estudantes da remessa (com CPF), no layout do relatorio oficial."""
+    con = db.connect()
+    r = dict(_lote(con, lid, u))
+    e = con.execute("SELECT cod_smtt FROM escolas WHERE id=?", (r["escola_id"],)).fetchone()
+    conteudo = pdf.gerar(r, (e["cod_smtt"] if e else "") or "", _logo_bytes(con)[1])
+    nome = Path(r["arquivo"]).stem + ".pdf"
+    return Response(conteudo, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+
+
 def _critica_resp(data: bytes, nome: str) -> dict:
     res = critica.criticar_arquivo(data, nome)
     res["relatorio"] = critica.relatorio_txt(res)
@@ -862,14 +874,16 @@ def salvar_config(cfg: dict, u: dict = Depends(admin)):
 LOGO_TIPOS = {"image/png", "image/jpeg", "image/svg+xml", "image/webp"}
 
 
+def _logo_bytes(con) -> tuple[str, bytes]:
+    r = con.execute("SELECT tipo, conteudo FROM arquivos_config WHERE chave='logo'").fetchone()
+    return (r["tipo"], bytes(r["conteudo"])) if r else ("image/png", (STATIC / "logo.png").read_bytes())
+
+
 @app.get("/api/logo")
 def logo():
     """Logo configurada pelo administrador (ou a padrao do sistema)."""
-    con = db.connect()
-    r = con.execute("SELECT tipo, conteudo FROM arquivos_config WHERE chave='logo'").fetchone()
-    if not r:
-        return FileResponse(STATIC / "logo.png", headers={"Cache-Control": "no-cache"})
-    return Response(bytes(r["conteudo"]), media_type=r["tipo"], headers={"Cache-Control": "no-cache"})
+    tipo, data = _logo_bytes(db.connect())
+    return Response(data, media_type=tipo, headers={"Cache-Control": "no-cache"})
 
 
 @app.put("/api/logo")

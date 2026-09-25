@@ -435,7 +435,7 @@ async function abrirAluno(id) {
         <dt>RG</dt><dd>${esc(x.rg) || "—"} ${esc(x.org_exp)}</dd><dt>Celular</dt><dd>${esc(x.celular || x.telefone) || "—"}</dd><dt>Cadastrado</dt><dd>${esc(x.cadastrado)}</dd></dl>`)}
       ${src("Alunos por status", d.status, x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Situação</dt><dd>${esc(x.situacao) || "—"}</dd>
         <dt>Telefone</dt><dd>${esc(x.telefone) || "—"}</dd><dt>Mãe</dt><dd>${esc(x.mae) || "—"}</dd></dl>`)}
-      ${d.lotes.length ? `<h3>Remessas</h3>${d.lotes.map(l => `<div>#${l.id} · ${esc(l.criado_em)} · <a href="/api/lotes/${l.id}/arquivo">${esc(l.arquivo)}</a></div>`).join("")}` : ""}
+      ${d.lotes.length ? `<h3>Remessas</h3>${d.lotes.map(l => `<div>#${l.id} · ${esc(l.criado_em)} · <a href="/api/lotes/${l.id}/arquivo">${esc(l.arquivo)}</a> · <a href="/api/lotes/${l.id}/pdf">PDF</a></div>`).join("")}` : ""}
     </div>`);
   $("#fAj").onsubmit = async ev => {
     ev.preventDefault();
@@ -570,7 +570,7 @@ async function remessas(_, qs) {
       <div id="finais"></div></div>`;
   $("#selEscR").onchange = ev => { resetPag("remessas"); location.hash = "#/remessas?escola=" + ev.target.value; };
   const rowL = l => `<tr><td>${l.id}</td><td>${esc(l.escola)}</td><td>${esc(l.criado_em)}</td><td class="num">${fmtN(l.n_alunos)}</td>
-      <td class="mono">${esc(l.arquivo)}</td><td class="row" style="gap:6px"><a class="btn" href="/api/lotes/${l.id}/arquivo">Baixar</a><a class="btn" href="#/critica?lote=${l.id}">Criticar</a><button data-ver="${l.id}">Alunos</button><button class="danger" data-del="${l.id}">Excluir</button></td></tr>`;
+      <td class="mono">${esc(l.arquivo)}</td><td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn" href="/api/lotes/${l.id}/arquivo">Baixar TXT</a><a class="btn" href="/api/lotes/${l.id}/pdf">Baixar PDF</a><a class="btn" href="#/critica?lote=${l.id}">Criticar</a><button data-ver="${l.id}">Alunos</button><button class="danger" data-del="${l.id}">Excluir</button></td></tr>`;
   const renderL = () => { const pg = paginar("remessas", ls, renderL); if ($("#tbLBody")) { $("#tbLBody").innerHTML = pg.itens.map(rowL).join(""); $("#pgL").innerHTML = pg.html; } };
   renderL();
   const finais = async () => {
