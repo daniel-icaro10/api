@@ -89,14 +89,19 @@ INSERT OR IGNORE INTO config VALUES ('remessa_bom', '1');
 INSERT OR IGNORE INTO config VALUES ('whatsapp', '');
 INSERT OR IGNORE INTO config VALUES ('suporte_texto', '');
 
--- Acesso: perfil admin (tudo) ou instituicao (um login por instituicao, so os proprios alunos)
+-- Acesso: perfil admin (tudo) ou instituicao (so as instituicoes vinculadas em usuario_escolas)
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY,
     login TEXT NOT NULL UNIQUE,
     senha_hash TEXT NOT NULL,
     perfil TEXT NOT NULL DEFAULT 'instituicao',
-    escola_id INTEGER REFERENCES escolas(id) ON DELETE CASCADE,
+    escola_id INTEGER REFERENCES escolas(id) ON DELETE CASCADE,  -- legado (um login por instituicao)
     criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS usuario_escolas (
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    escola_id INTEGER NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+    PRIMARY KEY (usuario_id, escola_id)
 );
 CREATE TABLE IF NOT EXISTS sessoes (
     token TEXT PRIMARY KEY,
@@ -138,9 +143,20 @@ CREATE TABLE IF NOT EXISTS importacoes (
 
 # colunas incluidas depois da primeira versao do banco
 COLUNAS_NOVAS = [("lotes", "num_remessa", "INTEGER"), ("escolas", "bloqueado", "INTEGER DEFAULT 0"),
-                 ("escolas", "motivo_bloqueio", "TEXT DEFAULT ''"), ("geduc", "telefone", "TEXT")] + [
+                 ("escolas", "motivo_bloqueio", "TEXT DEFAULT ''"), ("geduc", "telefone", "TEXT"),
+                 ("sessoes", "escola_id", "INTEGER")] + [
     ("ajustes", c, "TEXT") for c in ("aluno", "pai", "genero", "dt_nasc", "ano_serie", "turno", "turma", "matricula",
                                      "rua", "numero", "bairro", "cidade", "cep")]
+
+
+
+def _migra_vinculos(con):
+    """Usuarios da versao com um login por instituicao passam para a tabela de vinculos."""
+    with con:
+        con.execute("""INSERT INTO usuario_escolas (usuario_id, escola_id) SELECT id, escola_id FROM usuarios
+                       WHERE escola_id IS NOT NULL ON CONFLICT DO NOTHING""")
+        con.execute("UPDATE usuarios SET escola_id = NULL WHERE escola_id IS NOT NULL")
+
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 # horario local de Sao Luis (UTC-3); o servidor do Render roda em UTC
@@ -225,6 +241,7 @@ def _connect_pg() -> PgConnection:
                 con.execute(_schema_pg())
                 for t, c, tipo in COLUNAS_NOVAS:
                     con.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {c} {tipo}")
+                _migra_vinculos(con)
                 _schema_ok = True
     return con
 
@@ -241,6 +258,7 @@ def connect():
     for t, c, tipo in COLUNAS_NOVAS:
         if c not in {r[1] for r in con.execute(f"PRAGMA table_info({t})")}:
             con.execute(f"ALTER TABLE {t} ADD COLUMN {c} {tipo}")
+    _migra_vinculos(con)
     return con
 
 

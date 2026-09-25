@@ -23,6 +23,7 @@
   <symbol id="i-config" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
   <symbol id="i-suporte" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
   <symbol id="i-whatsapp" viewBox="0 0 24 24"><path d="M3 21l1.7-4.9A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-2-1-1 1a4 4 0 0 1-2-2l1-1-1-2z"/></symbol>
+  <symbol id="i-usuarios" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1"/><path d="M16 4a4 4 0 0 1 0 8"/><path d="M22 21v-1a6 6 0 0 0-4-5.6"/></symbol>
   <symbol id="i-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
 </svg>
@@ -52,6 +53,7 @@
     <a href="#/orcamento" data-r="orcamento" data-admin><svg class="i"><use href="#i-orcamento"/></svg>Orçamento</a>
     <div class="nav-label" data-admin>Cadastros</div>
     <a href="#/escolas" data-r="escolas" data-admin><svg class="i"><use href="#i-escolas"/></svg>Instituições</a>
+    <a href="#/usuarios" data-r="usuarios" data-admin><svg class="i"><use href="#i-usuarios"/></svg>Usuários</a>
     <a href="#/bases" data-r="bases" data-admin><svg class="i"><use href="#i-bases"/></svg>Bases e importação</a>
     <a href="#/config" data-r="config" data-admin><svg class="i"><use href="#i-config"/></svg>Configurações</a>
   </nav>
@@ -70,6 +72,7 @@
       <button class="user-btn" id="userBtn" aria-haspopup="true"><span class="user-av" id="userAv"></span>
         <span class="user-txt"><b id="userNome"></b><small id="userPerfil"></small></span></button>
       <div class="user-menu" id="userMenu" hidden>
+        <div id="trocaEsc"></div>
         <button id="senhaBtn">Alterar senha</button>
         <button id="sairBtn" class="danger"><svg class="i"><use href="#i-sair"/></svg>Sair</button>
       </div>

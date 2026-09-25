@@ -73,20 +73,37 @@ def _bloqueio_msg(motivo: str) -> str:
     return "Acesso da instituição bloqueado" + (f": {motivo}" if motivo else "") + ". Procure o suporte."
 
 
+def _instituicoes(con, uid: int) -> list[dict]:
+    return [dict(r) for r in con.execute(
+        """SELECT e.id, e.nome, e.bloqueado, e.motivo_bloqueio FROM usuario_escolas ue
+           JOIN escolas e ON e.id = ue.escola_id WHERE ue.usuario_id=? ORDER BY e.nome""", (uid,))]
+
+
+def _escopo(insts: list[dict], preferida: int | None) -> dict:
+    """Instituicao ativa do usuario (a preferida, se continuar liberada) e as que ele pode alternar."""
+    if not insts:
+        raise HTTPException(403, "Acesso sem instituição vinculada. Procure o administrador.")
+    livres = [e for e in insts if not e["bloqueado"]]
+    if not livres:
+        raise HTTPException(403, _bloqueio_msg(insts[0]["motivo_bloqueio"]))
+    ativa = next((e for e in livres if e["id"] == preferida), livres[0])
+    return {"escola_id": ativa["id"], "escola_nome": ativa["nome"],
+            "escolas": [{"id": e["id"], "nome": e["nome"]} for e in livres]}
+
+
 def usuario(request: Request) -> dict:
     token = request.cookies.get(COOKIE)
     if not token:
         raise HTTPException(401, "Faça login")
     con = db.connect()
-    r = con.execute("""SELECT u.id, u.login, u.perfil, u.escola_id, s.expira, e.nome escola_nome, e.bloqueado,
-                       e.motivo_bloqueio FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id
-                       LEFT JOIN escolas e ON e.id = u.escola_id WHERE s.token=?""", (token,)).fetchone()
+    r = con.execute("""SELECT u.id, u.login, u.perfil, s.expira, s.escola_id ativa FROM sessoes s
+                       JOIN usuarios u ON u.id = s.usuario_id WHERE s.token=?""", (token,)).fetchone()
     if not r or r["expira"] < time.time():
         raise HTTPException(401, "Sessão expirada, faça login novamente")
-    u = dict(r)
-    if u["perfil"] != "admin" and u["bloqueado"]:
-        raise HTTPException(403, _bloqueio_msg(u["motivo_bloqueio"]))
-    return u
+    u = {**dict(r), "token": token}
+    if u["perfil"] == "admin":
+        return {**u, "escola_id": None, "escola_nome": "", "escolas": []}
+    return {**u, **_escopo(_instituicoes(con, u["id"]), u["ativa"])}
 
 
 def admin(u: dict = Depends(usuario)) -> dict:
@@ -114,8 +131,8 @@ def _checa_aluno(con, u: dict, id_aluno: str):
 
 
 def _sessao_json(u: dict) -> dict:
-    return {"login": u["login"], "perfil": u["perfil"], "escola_id": u["escola_id"],
-            "escola_nome": u.get("escola_nome") or ""}
+    return {"login": u["login"], "perfil": u["perfil"], "escola_id": u.get("escola_id"),
+            "escola_nome": u.get("escola_nome") or "", "escolas": u.get("escolas") or []}
 
 
 class LoginIn(BaseModel):
@@ -132,12 +149,12 @@ def publico():
             "whatsapp": so_digitos(db.get_config(con, "whatsapp")), "suporte_texto": db.get_config(con, "suporte_texto")}
 
 
-def _abre_sessao(con, request: Request, response: Response, uid: int):
+def _abre_sessao(con, request: Request, response: Response, uid: int, escola_id: int | None = None):
     token = secrets.token_urlsafe(32)
     with con:
         con.execute("DELETE FROM sessoes WHERE expira < ?", (time.time(),))
-        con.execute("INSERT INTO sessoes (token, usuario_id, expira) VALUES (?,?,?)",
-                    (token, uid, time.time() + SESSAO_HORAS * 3600))
+        con.execute("INSERT INTO sessoes (token, usuario_id, expira, escola_id) VALUES (?,?,?,?)",
+                    (token, uid, time.time() + SESSAO_HORAS * 3600, escola_id))
     https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(COOKIE, token, max_age=SESSAO_HORAS * 3600, httponly=True, samesite="lax", secure=https)
 
@@ -162,15 +179,12 @@ def setup(d: LoginIn, request: Request, response: Response):
 @app.post("/api/login")
 def login(d: LoginIn, request: Request, response: Response):
     con = db.connect()
-    r = con.execute("""SELECT u.*, e.nome escola_nome, e.bloqueado, e.motivo_bloqueio FROM usuarios u
-                       LEFT JOIN escolas e ON e.id = u.escola_id WHERE u.login=?""",
-                    (d.login.strip().lower(),)).fetchone()
+    r = con.execute("SELECT * FROM usuarios WHERE login=?", (d.login.strip().lower(),)).fetchone()
     if not r or not _confere(d.senha, r["senha_hash"]):
         raise HTTPException(401, "Login ou senha inválidos")
-    if r["perfil"] != "admin" and r["bloqueado"]:
-        raise HTTPException(403, _bloqueio_msg(r["motivo_bloqueio"]))
-    _abre_sessao(con, request, response, r["id"])
-    return _sessao_json(dict(r))
+    esc = {} if r["perfil"] == "admin" else _escopo(_instituicoes(con, r["id"]), None)
+    _abre_sessao(con, request, response, r["id"], esc.get("escola_id"))
+    return _sessao_json({**dict(r), **esc})
 
 
 @app.post("/api/logout")
@@ -185,6 +199,111 @@ def logout(request: Request, response: Response):
 @app.get("/api/sessao")
 def sessao(u: dict = Depends(usuario)):
     return _sessao_json(u)
+
+
+class TrocaIn(BaseModel):
+    escola_id: int
+
+
+@app.put("/api/sessao/escola")
+def trocar_instituicao(t: TrocaIn, u: dict = Depends(usuario)):
+    """Usuario vinculado a varias instituicoes escolhe a instituicao ativa."""
+    if _eh_admin(u) or t.escola_id not in {e["id"] for e in u["escolas"]}:
+        raise HTTPException(403, "Sem acesso a esta instituição")
+    con = db.connect()
+    with con:
+        con.execute("UPDATE sessoes SET escola_id=? WHERE token=?", (t.escola_id, u["token"]))
+    return _sessao_json({**u, "escola_id": t.escola_id,
+                         "escola_nome": next(e["nome"] for e in u["escolas"] if e["id"] == t.escola_id)})
+
+
+# ------------------------------------------------------------------ usuarios (cadastrados pelo administrador)
+
+class UsuarioIn(BaseModel):
+    login: str
+    senha: str = ""
+    perfil: str = "instituicao"
+    escolas: list[int] = []
+
+
+def _usuarios(con) -> list[dict]:
+    vinc = {}
+    for r in con.execute("SELECT usuario_id, escola_id FROM usuario_escolas"):
+        vinc.setdefault(r["usuario_id"], []).append(r["escola_id"])
+    return [{"id": r["id"], "login": r["login"], "perfil": r["perfil"], "criado_em": r["criado_em"],
+             "escolas": sorted(vinc.get(r["id"], []))}
+            for r in con.execute("SELECT * FROM usuarios ORDER BY perfil, login")]
+
+
+def _valida_usuario(con, d: UsuarioIn, uid: int | None) -> str:
+    login = d.login.strip().lower()
+    if not login:
+        raise HTTPException(400, "Informe o login")
+    if d.perfil not in ("admin", "instituicao"):
+        raise HTTPException(400, "Perfil inválido")
+    outro = con.execute("SELECT id FROM usuarios WHERE login=?", (login,)).fetchone()
+    if outro and outro["id"] != uid:
+        raise HTTPException(400, f"O login '{login}' já está em uso")
+    if d.senha or uid is None:
+        _valida_senha(d.senha)
+    if d.perfil == "instituicao":
+        if not d.escolas:
+            raise HTTPException(400, "Vincule o usuário a ao menos uma instituição")
+        existentes = {r["id"] for r in con.execute("SELECT id FROM escolas")}
+        if set(d.escolas) - existentes:
+            raise HTTPException(400, "Instituição não encontrada")
+    return login
+
+
+def _grava_vinculos(con, uid: int, d: UsuarioIn):
+    con.execute("DELETE FROM usuario_escolas WHERE usuario_id=?", (uid,))
+    if d.perfil == "instituicao":
+        con.executemany("INSERT INTO usuario_escolas (usuario_id, escola_id) VALUES (?,?)",
+                        [(uid, e) for e in sorted(set(d.escolas))])
+
+
+@app.get("/api/usuarios")
+def listar_usuarios(u: dict = Depends(admin)):
+    return _usuarios(db.connect())
+
+
+@app.post("/api/usuarios")
+def criar_usuario(d: UsuarioIn, u: dict = Depends(admin)):
+    con = db.connect()
+    login = _valida_usuario(con, d, None)
+    with con:
+        uid = con.execute("INSERT INTO usuarios (login, senha_hash, perfil) VALUES (?,?,?) RETURNING id",
+                          (login, _hash(d.senha), d.perfil)).fetchone()[0]
+        _grava_vinculos(con, uid, d)
+    return {"id": uid}
+
+
+@app.put("/api/usuarios/{uid}")
+def editar_usuario(uid: int, d: UsuarioIn, u: dict = Depends(admin)):
+    """Senha vazia mantem a atual."""
+    con = db.connect()
+    if not con.execute("SELECT 1 FROM usuarios WHERE id=?", (uid,)).fetchone():
+        raise HTTPException(404, "Usuário não encontrado")
+    if uid == u["id"] and d.perfil != "admin":
+        raise HTTPException(400, "Você não pode tirar o seu próprio perfil de administrador")
+    login = _valida_usuario(con, d, uid)
+    with con:
+        con.execute("UPDATE usuarios SET login=?, perfil=? WHERE id=?", (login, d.perfil, uid))
+        if d.senha:
+            con.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (_hash(d.senha), uid))
+            con.execute("DELETE FROM sessoes WHERE usuario_id=? AND token<>?", (uid, u["token"]))
+        _grava_vinculos(con, uid, d)
+    return {"ok": True}
+
+
+@app.delete("/api/usuarios/{uid}")
+def excluir_usuario(uid: int, u: dict = Depends(admin)):
+    if uid == u["id"]:
+        raise HTTPException(400, "Você não pode excluir o próprio usuário")
+    con = db.connect()
+    with con:
+        con.execute("DELETE FROM usuarios WHERE id=?", (uid,))
+    return {"ok": True}
 
 
 class SenhaIn(BaseModel):
@@ -250,11 +369,13 @@ class EscolaIn(BaseModel):
 @app.get("/api/escolas")
 def listar_escolas(u: dict = Depends(usuario)):
     con = db.connect()
-    sql = """SELECT e.*, us.login FROM escolas e
-             LEFT JOIN usuarios us ON us.escola_id = e.id AND us.perfil = 'instituicao'"""
-    if _eh_admin(u):
-        return [dict(r) for r in con.execute(sql + " ORDER BY e.id")]
-    return [dict(r) for r in con.execute(sql + " WHERE e.id=?", (u["escola_id"],))]
+    if not _eh_admin(u):
+        return [dict(r) for r in con.execute("SELECT * FROM escolas WHERE id=?", (u["escola_id"],))]
+    logins = {}
+    for r in con.execute("""SELECT ue.escola_id, us.login FROM usuario_escolas ue
+                            JOIN usuarios us ON us.id = ue.usuario_id ORDER BY us.login"""):
+        logins.setdefault(r["escola_id"], []).append(r["login"])
+    return [{**dict(r), "logins": logins.get(r["id"], [])} for r in con.execute("SELECT * FROM escolas ORDER BY id")]
 
 
 @app.post("/api/escolas")
@@ -290,47 +411,6 @@ def excluir_escola(eid: int, u: dict = Depends(admin)):
         raise HTTPException(400, "Instituição possui remessas geradas; exclua as remessas antes")
     with con:
         con.execute("DELETE FROM escolas WHERE id=?", (eid,))
-    return {"ok": True}
-
-
-class AcessoIn(BaseModel):
-    login: str
-    senha: str = ""
-
-
-@app.put("/api/escolas/{eid}/acesso")
-def definir_acesso(eid: int, a: AcessoIn, u: dict = Depends(admin)):
-    """Login da instituicao (um por instituicao). Senha vazia mantem a atual."""
-    con = db.connect()
-    _escola(con, eid)
-    login = a.login.strip().lower()
-    if not login:
-        raise HTTPException(400, "Informe o login")
-    atual = con.execute("SELECT id FROM usuarios WHERE escola_id=? AND perfil='instituicao'", (eid,)).fetchone()
-    outro = con.execute("SELECT id FROM usuarios WHERE login=?", (login,)).fetchone()
-    if outro and (not atual or outro["id"] != atual["id"]):
-        raise HTTPException(400, f"O login '{login}' já está em uso")
-    if a.senha:
-        _valida_senha(a.senha)
-    elif not atual:
-        raise HTTPException(400, "Informe a senha do novo acesso")
-    with con:
-        if atual:
-            con.execute("UPDATE usuarios SET login=? WHERE id=?", (login, atual["id"]))
-            if a.senha:
-                con.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (_hash(a.senha), atual["id"]))
-                con.execute("DELETE FROM sessoes WHERE usuario_id=?", (atual["id"],))
-        else:
-            con.execute("INSERT INTO usuarios (login, senha_hash, perfil, escola_id) VALUES (?,?,'instituicao',?)",
-                        (login, _hash(a.senha), eid))
-    return {"ok": True}
-
-
-@app.delete("/api/escolas/{eid}/acesso")
-def remover_acesso(eid: int, u: dict = Depends(admin)):
-    con = db.connect()
-    with con:
-        con.execute("DELETE FROM usuarios WHERE escola_id=? AND perfil='instituicao'", (eid,))
     return {"ok": True}
 
 

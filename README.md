@@ -7,18 +7,19 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 1. Dê dois cliques em `abrir.bat`. O sistema abre em http://127.0.0.1:8010.
 2. No primeiro acesso, crie o login e a senha do **administrador**.
 3. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`/`.csv`).
-4. Em **Instituições**, confira o **vínculo GEDUC** das instituições marcadas "0 — vincular", que são as que têm nome diferente no GEDUC. Em **Acesso**, crie o login de cada instituição.
+4. Em **Instituições**, confira o **vínculo GEDUC** das instituições marcadas "0 — vincular", que são as que têm nome diferente no GEDUC. Em **Usuários**, crie os logins e vincule cada um a uma ou mais instituições.
 5. Em **Matriculado**, escolha a instituição, filtre as pendências e clique em **Corrigir** para editar a informação incorreta. Ao salvar, o aluno é reprocessado na hora. Depois selecione os aptos e clique em **Gerar remessa SMTT**.
 
 ## Perfis de acesso
 
 | Perfil | Pode |
 |---|---|
-| Administrador | Tudo: cadastrar instituições, criar o acesso de cada uma, bloquear e desbloquear, gerar orçamentos, importar bases e mudar as configurações (logo, suporte, WhatsApp, preço) |
-| Instituição | Um login por instituição. Vê só os próprios alunos: Painel, Matriculado (correções e cadastro individual), Remessas, arquivo do processamento final, Criticar remessa e Relatórios. Não cadastra instituições nem gera orçamentos |
+| Administrador | Tudo: cadastrar instituições e usuários, bloquear e desbloquear, gerar orçamentos, importar bases e mudar as configurações (logo, suporte, WhatsApp, preço) |
+| Instituição | Vê só os alunos das instituições vinculadas ao usuário: Painel, Matriculado (correções e cadastro individual), Remessas, arquivo do processamento final, Criticar remessa e Relatórios. Não cadastra instituições nem gera orçamentos |
 
-- O nome da instituição logada aparece no canto superior direito, junto com as opções de alterar senha e sair.
-- **Bloqueio**: em Instituições, o botão **Bloquear** impede o acesso da instituição (por exemplo, por pendência de pagamento). O motivo aparece na tela de login, e quem já estava no sistema é desconectado na próxima ação.
+- O administrador cadastra os usuários em **Usuários** e vincula cada um a uma ou mais instituições.
+- O nome da instituição ativa aparece no canto superior direito. Quem tem mais de uma instituição troca a ativa pelo menu desse canto, que também tem alterar senha e sair.
+- **Bloqueio**: em Instituições, o botão **Bloquear** impede o acesso à instituição (por exemplo, por pendência de pagamento). O usuário vinculado a outras instituições continua entrando nelas; quem só tem instituições bloqueadas vê o motivo na tela de login e é desconectado na próxima ação.
 - O administrador também pode ser criado pelas variáveis `SMPE_ADMIN_LOGIN` e `SMPE_ADMIN_SENHA`, quando o banco ainda não tem nenhum usuário.
 - A sessão dura 12 horas. As senhas são guardadas com hash PBKDF2.
 

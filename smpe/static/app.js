@@ -16,7 +16,7 @@ async function api(url, opts = {}) {
   if (!r.ok) {
     let msg = r.statusText;
     try { const j = await r.json(); msg = j.detail || msg; } catch {}
-    if (!opts.semLogin && (r.status === 401 || (r.status === 403 && msg.startsWith("Acesso da instituição bloqueado")))) {
+    if (!opts.semLogin && (r.status === 401 || (r.status === 403 && msg.startsWith("Acesso ")))) {
       mostrarLogin(url === "/api/sessao" ? "" : msg); throw new Error(msg);
     }
     if (!opts.semLogin) toast("Erro: " + msg);
@@ -63,8 +63,19 @@ function entrar() {
   $("#userPerfil").textContent = ehAdmin() ? `${SESSAO.login} · acesso total` : `Instituição · ${SESSAO.login}`;
   $("#userAv").textContent = iniciais(nome);
   $("#buscaInput").placeholder = ehAdmin() ? "Localizar estudante por nome ou CPF…" : "Localizar estudante da instituição…";
+  const escs = SESSAO.escolas || [];
+  $("#trocaEsc").innerHTML = escs.length > 1 ? `<div class="um-label">Trocar instituição</div>` + escs.map(e =>
+    `<button class="um-esc ${e.id === SESSAO.escola_id ? "active" : ""}" data-esc="${e.id}">${esc(e.nome)}</button>`).join("") : "";
+  $("#userPerfil").textContent += escs.length > 1 ? ` · ${escs.length} instituições` : "";
   router();
 }
+$("#trocaEsc").onclick = async ev => {
+  const b = ev.target.closest("[data-esc]");
+  if (!b || +b.dataset.esc === SESSAO.escola_id) return;
+  SESSAO = await api("/api/sessao/escola", {method: "PUT", body: {escola_id: +b.dataset.esc}});
+  MIG = null; await loadEscolas(); toast("Instituição ativa: " + SESSAO.escola_nome);
+  location.hash = "#/painel"; entrar();
+};
 function aplicarPublico() {
   const wa = PUBLICO.whatsapp;
   $("#waBtn").hidden = !wa; if (wa) $("#waBtn").href = waLink(wa);
@@ -171,14 +182,16 @@ const ultimaEscola = () => {
 };
 
 // ------------------------------------------------------------------ roteador
-const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config};
-const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config"]);
+const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config, usuarios};
+const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config", "usuarios"]);
 const TITLES = {painel: "Painel", migracao: "Matriculado", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
-  relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante", config: "Configurações"};
+  relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante", config: "Configurações",
+  usuarios: "Usuários"};
 const CRUMBS = {painel: "Visão geral da migração nas instituições", migracao: "Alunos matriculados · cruzamento de CPF GEDUC × Censo × SMTT × Status",
   escolas: "Instituições de ensino, acesso e vínculo com o GEDUC", remessas: "Arquivos enviados ao banco de dados da SMTT", critica: "Mesmas regras do validador oficial SMPE (AlunoCritica)",
   relatorios: "Listas para conferência e preenchimento pela instituição", orcamento: "Valores por instituição (somente alunos com CPF)",
-  bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte e orçamento"};
+  bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte e orçamento",
+  usuarios: "Logins, perfis e instituições vinculadas"};
 async function router() {
   if (!SESSAO) return;
   const [path, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
@@ -471,14 +484,14 @@ async function escolas() {
   const res = Object.fromEntries(pn.escolas.map(e => [e.id, e]));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} instituições</h2><span class="spacer"></span>
       <input id="fE" placeholder="Filtrar…" style="width:220px"><button class="primary" id="novaEsc">Nova instituição</button></div>
-    <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th><th>Acesso</th><th>Situação</th><th></th></tr></thead>
+    <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th><th>Usuários</th><th>Situação</th><th></th></tr></thead>
     <tbody id="tbEBody"></tbody></table></div><div id="pgE"></div></div>`;
   const rowE = e => `<tr data-n="${esc(e.nome.toLowerCase())}"><td>${e.id}</td><td>${esc(e.nome)}</td><td class="mono">${esc(e.cod_smtt)}</td><td class="mono">${esc(e.inep)}</td>
       <td>${e.geduc_nome ? esc(e.geduc_nome) : `<span class="muted">mesmo nome</span>`}</td>
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
-      <td>${e.login ? `<span class="mono">${esc(e.login)}</span>` : `<span class="badge b-mute">sem acesso</span>`}</td>
+      <td>${e.logins?.length ? e.logins.map(l => `<div class="mono">${esc(l)}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
       <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : `<span class="badge b-ok">ativa</span>`}</td>
-      <td style="width:1%"><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn-sm" data-ed="${e.id}">Editar</button><button class="btn-sm" data-ac="${e.id}">Acesso</button>
+      <td style="width:1%"><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn-sm" data-ed="${e.id}">Editar</button>
         <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
   const renderE = () => {
     const q = $("#fE").value.toLowerCase(), pg = paginar("escolas", ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q), renderE);
@@ -491,26 +504,8 @@ async function escolas() {
   $("#tbE").onclick = ev => {
     const b = ev.target.closest("button"); if (!b) return;
     if (b.dataset.ed) editarEscola(+b.dataset.ed);
-    if (b.dataset.ac) acessoEscola(+b.dataset.ac);
     if (b.dataset.bl) bloqueioEscola(+b.dataset.bl);
   };
-}
-function acessoEscola(id) {
-  const e = ESCOLAS.find(x => x.id === id);
-  modal(`<div class="mh"><h2>Acesso da instituição</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
-    <form id="fAc"><div class="mb form">
-      <div class="full"><p class="muted" style="margin:0">${esc(e.nome)} — perfil <b>Instituição</b>: vê só os próprios alunos, sem cadastrar instituições nem gerar orçamentos.</p></div>
-      <div><label>Login</label><input name="login" required value="${esc(e.login || "")}" autocomplete="off"></div>
-      <div><label>${e.login ? "Nova senha (vazio = manter a atual)" : "Senha (mín. 6 caracteres)"}</label><input name="senha" type="password" ${e.login ? "" : "required"} minlength="6" autocomplete="new-password"></div>
-    </div>
-    <div class="mf">${e.login ? `<button type="button" class="danger" id="delAc">Remover acesso</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
-  $("#fAc").onsubmit = async ev => {
-    ev.preventDefault();
-    await api(`/api/escolas/${id}/acesso`, {method: "PUT", body: Object.fromEntries(new FormData(ev.target))});
-    closeModal(); toast("Acesso salvo"); escolas();
-  };
-  const del = $("#delAc");
-  if (del) del.onclick = async () => { if (confirm("Remover o acesso desta instituição?")) { await api(`/api/escolas/${id}/acesso`, {method: "DELETE"}); closeModal(); escolas(); } };
 }
 async function bloqueioEscola(id) {
   const e = ESCOLAS.find(x => x.id === id);
@@ -520,7 +515,7 @@ async function bloqueioEscola(id) {
   }
   modal(`<div class="mh"><h2>Bloquear acesso</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
     <form id="fBl"><div class="mb form">
-      <div class="full"><p class="muted" style="margin:0">${esc(e.nome)} não conseguirá entrar no sistema até ser desbloqueada. O motivo aparece na tela de login.</p></div>
+      <div class="full"><p class="muted" style="margin:0">Ninguém entra em ${esc(e.nome)} até ela ser desbloqueada. Usuários vinculados só a ela não conseguem entrar no sistema, e o motivo aparece na tela de login.</p></div>
       <div class="full"><label>Motivo</label><select name="tipo"><option>Pendência de pagamento</option><option>Outro</option></select></div>
       <div class="full"><label>Detalhe (opcional)</label><input name="det" placeholder="Ex.: fatura de agosto em aberto"></div>
     </div><div class="mf"><button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Bloquear</button></div></form>`);
@@ -556,7 +551,7 @@ async function editarEscola(id) {
     closeModal(); toast("Instituição salva"); escolas();
   };
   const del = $("#delEsc");
-  if (del) del.onclick = async () => { if (confirm("Excluir esta instituição? O acesso, os arquivos finais e os alunos do cadastro individual também serão excluídos.")) { await api(`/api/escolas/${id}`, {method: "DELETE"}); closeModal(); escolas(); } };
+  if (del) del.onclick = async () => { if (confirm("Excluir esta instituição? Os vínculos de usuários, os arquivos finais e os alunos do cadastro individual também serão excluídos.")) { await api(`/api/escolas/${id}`, {method: "DELETE"}); closeModal(); escolas(); } };
 }
 
 // ------------------------------------------------------------------ remessas
@@ -811,6 +806,61 @@ async function config() {
     PUBLICO = await api("/api/publico"); aplicarPublico(); toast("Suporte salvo");
   };
   $("#fPreco").onsubmit = async ev => { ev.preventDefault(); await api("/api/config", {method: "PUT", body: Object.fromEntries(new FormData(ev.target))}); toast("Preço salvo"); };
+}
+
+// ------------------------------------------------------------------ usuarios (admin)
+async function usuarios() {
+  const [us] = [await api("/api/usuarios"), await loadEscolas()];
+  const nomes = Object.fromEntries(ESCOLAS.map(e => [e.id, e.nome]));
+  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${us.length} usuário(s)</h2><span class="spacer"></span>
+      <input id="fU" placeholder="Filtrar login ou instituição…" style="width:260px"><button class="primary" id="novoU">Novo usuário</button></div>
+    <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Login</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
+    <tbody id="tbUBody"></tbody></table></div><div id="pgU"></div></div>`;
+  const rowU = x => `<tr><td class="mono"><b>${esc(x.login)}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
+      <td>${x.perfil === "admin" ? `<span class="badge b-info">Administrador</span>` : `<span class="badge b-mute">Instituição</span>`}</td>
+      <td>${x.perfil === "admin" ? `<span class="muted">todas</span>` : x.escolas.map(id => `<div>${esc(nomes[id] || "#" + id)}${ESCOLAS.find(e => e.id === id)?.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</div>`).join("")}</td>
+      <td>${esc(x.criado_em)}</td><td><button class="btn-sm" data-u="${x.id}">Editar</button></td></tr>`;
+  const renderU = () => {
+    const q = $("#fU").value.toLowerCase();
+    const pg = paginar("usuarios", us.filter(x => x.login.includes(q) || x.escolas.some(id => (nomes[id] || "").toLowerCase().includes(q))), renderU);
+    $("#tbUBody").innerHTML = pg.itens.map(rowU).join("") || `<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>`;
+    $("#pgU").innerHTML = pg.html;
+  };
+  $("#fU").oninput = () => { resetPag("usuarios"); renderU(); };
+  renderU();
+  $("#novoU").onclick = () => editarUsuario(null);
+  $("#tbU").onclick = ev => { const b = ev.target.closest("[data-u]"); if (b) editarUsuario(us.find(x => x.id === +b.dataset.u)); };
+}
+function editarUsuario(x) {
+  const novo = !x; x = x || {login: "", perfil: "instituicao", escolas: []};
+  const proprio = x.login === SESSAO.login;
+  modal(`<div class="mh"><h2>${novo ? "Novo usuário" : "Editar usuário"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form id="fUsr"><div class="mb form">
+      <div><label>Login</label><input name="login" required value="${esc(x.login)}" autocomplete="off"></div>
+      <div><label>${novo ? "Senha (mín. 6 caracteres)" : "Nova senha (vazio = manter a atual)"}</label><input name="senha" type="password" ${novo ? "required" : ""} minlength="6" autocomplete="new-password"></div>
+      <div class="full"><label>Perfil</label><select name="perfil" ${proprio ? "disabled" : ""}>
+        <option value="instituicao" ${x.perfil === "instituicao" ? "selected" : ""}>Instituição: acessa só as instituições vinculadas, sem cadastrar instituições nem gerar orçamentos</option>
+        <option value="admin" ${x.perfil === "admin" ? "selected" : ""}>Administrador: acesso total</option></select></div>
+      <div class="full" id="boxEsc"><label>Instituições vinculadas <span id="nSel" class="muted"></span></label>
+        <input id="fEscU" placeholder="Filtrar instituição…" style="margin-bottom:8px">
+        <div class="chk-list">${ESCOLAS.map(e => `<label data-n="${esc(e.nome.toLowerCase())}"><input type="checkbox" name="escolas" value="${e.id}" ${x.escolas.includes(e.id) ? "checked" : ""}>
+          ${e.id} · ${esc(e.nome)}${e.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</label>`).join("") || `<span class="muted">Nenhuma instituição cadastrada.</span>`}</div>
+        <small class="muted">Com mais de uma, o usuário troca a instituição ativa pelo menu no canto superior direito.</small></div>
+    </div>
+    <div class="mf">${!novo && !proprio ? `<button type="button" class="danger" id="delU">Excluir</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
+  const f = $("#fUsr");
+  const upd = () => { $("#boxEsc").hidden = f.perfil.value === "admin"; $("#nSel").textContent = `(${$$("[name=escolas]:checked", f).length} selecionada(s))`; };
+  f.perfil.onchange = upd; f.onchange = upd; upd();
+  $("#fEscU").oninput = ev => { const q = ev.target.value.toLowerCase(); $$(".chk-list label", f).forEach(l => l.hidden = !l.dataset.n.includes(q)); };
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    const body = {login: f.login.value, senha: f.senha.value, perfil: proprio ? "admin" : f.perfil.value,
+      escolas: $$("[name=escolas]:checked", f).map(c => +c.value)};
+    if (novo) await api("/api/usuarios", {method: "POST", body}); else await api(`/api/usuarios/${x.id}`, {method: "PUT", body});
+    closeModal(); toast("Usuário salvo"); usuarios();
+  };
+  const del = $("#delU");
+  if (del) del.onclick = async () => { if (confirm(`Excluir o usuário ${x.login}?`)) { await api(`/api/usuarios/${x.id}`, {method: "DELETE"}); closeModal(); toast("Usuário excluído"); usuarios(); } };
 }
 
 async function boot() {
