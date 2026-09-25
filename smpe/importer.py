@@ -21,7 +21,8 @@ BASES = {
         "id_ano_serie": ["ID_ANO_SERIE"], "aluno": ["ALUNO"], "mae": ["MAE"], "pai": ["PAI"], "genero": ["GENERO"],
         "ano_serie": ["ANO_SERIE"], "turno": ["TURNO"], "turma": ["TURMA"], "id_aluno": ["ID_ALUNO"],
         "dt_nasc": ["DT_NASCIMENTO"], "rua": ["RUA"], "numero": ["NUMERO"], "bairro": ["BAIRRO"],
-        "cidade": ["CIDADE"], "cep": ["CEP"], "cpf": ["CPF_ALUNO", "CPF"]}),
+        "cidade": ["CIDADE"], "cep": ["CEP", "CEP_ALUNO", "CEP ALUNO"], "cpf": ["CPF_ALUNO", "CPF"],
+        "telefone": ["TELEFONE", "TELEFONE_ALUNO", "CELULAR", "FONE"]}),
     "censo": ("CENSO", "NOME DO ALUNO", {
         "id_inep": ["IDENTIFICACAO UNICA"], "aluno": ["NOME DO ALUNO"], "dt_nasc": ["DATA DE NASCIMENTO"],
         "cor": ["COR/RACA"], "sexo": ["SEXO"], "cpf": ["CPF"]}),
@@ -43,7 +44,7 @@ BASES = {
 DATE_COLS = {"dt_nasc", "nascido", "data_exp", "nascimento"}
 CPF_COLS = {"cpf"}
 NOME_COL = {"geduc": "aluno", "censo": "aluno", "smtt": "estudante", "status_alunos": "aluno"}
-LABELS = {"escolas": "Cadastro de escolas", "geduc": "GEDUC", "censo": "Censo escolar", "smtt": "SMTT",
+LABELS = {"escolas": "Cadastro de instituições", "geduc": "GEDUC", "censo": "Censo escolar", "smtt": "SMTT",
           "status_alunos": "Alunos por status"}
 
 

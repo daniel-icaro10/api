@@ -15,6 +15,14 @@ def norm_nome(s) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^A-Z ]", " ", s)).strip()
 
 
+_PARTICULAS = {"DA", "DE", "DO", "DAS", "DOS", "E", "D"}
+
+
+def nome_completo(s) -> bool:
+    """Nome e sobrenome: ao menos duas palavras, sem contar as particulas (DA, DE, DOS...)."""
+    return len([p for p in norm_nome(s).split() if p not in _PARTICULAS]) >= 2
+
+
 def norm_cpf(v) -> str:
     """Igual as colunas AK:AN da aba ESCOLA: tira pontuacao e completa zeros a esquerda (9/10 digitos)."""
     if v is None:

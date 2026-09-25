@@ -1,13 +1,26 @@
 # SIS SMPE (web)
 
-Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de estudantes da rede municipal para o cadastro da SMTT: cruza o CPF das bases GEDUC, Censo e SMTT, aponta as pendências de cada escola, gera a remessa em layout fixo e calcula o orçamento.
+Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de estudantes da rede municipal para o cadastro da SMTT: cruza o CPF das bases GEDUC, Censo, SMTT e Alunos por status, aponta as pendências de cada instituição, gera a remessa em layout fixo e calcula o orçamento.
 
 ## Como usar
 
 1. Dê dois cliques em `abrir.bat`. O sistema abre em http://127.0.0.1:8010.
-2. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`/`.csv`).
-3. Em **Escolas**, confira o **vínculo GEDUC** das escolas marcadas "0 — vincular", que são as que têm nome diferente no GEDUC.
-4. Em **Migração**, escolha a escola, filtre as pendências e corrija os alunos clicando neles. Depois selecione os aptos e clique em **Gerar remessa SMTT**.
+2. No primeiro acesso, crie o login e a senha do **administrador**.
+3. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`/`.csv`).
+4. Em **Instituições**, confira o **vínculo GEDUC** das instituições marcadas "0 — vincular", que são as que têm nome diferente no GEDUC. Em **Acesso**, crie o login de cada instituição.
+5. Em **Matriculado**, escolha a instituição, filtre as pendências e clique em **Corrigir** para editar a informação incorreta. Ao salvar, o aluno é reprocessado na hora. Depois selecione os aptos e clique em **Gerar remessa SMTT**.
+
+## Perfis de acesso
+
+| Perfil | Pode |
+|---|---|
+| Administrador | Tudo: cadastrar instituições, criar o acesso de cada uma, bloquear e desbloquear, gerar orçamentos, importar bases e mudar as configurações (logo, suporte, WhatsApp, preço) |
+| Instituição | Um login por instituição. Vê só os próprios alunos: Painel, Matriculado (correções e cadastro individual), Remessas, arquivo do processamento final, Criticar remessa e Relatórios. Não cadastra instituições nem gera orçamentos |
+
+- O nome da instituição logada aparece no canto superior direito, junto com as opções de alterar senha e sair.
+- **Bloqueio**: em Instituições, o botão **Bloquear** impede o acesso da instituição (por exemplo, por pendência de pagamento). O motivo aparece na tela de login, e quem já estava no sistema é desconectado na próxima ação.
+- O administrador também pode ser criado pelas variáveis `SMPE_ADMIN_LOGIN` e `SMPE_ADMIN_SENHA`, quando o banco ainda não tem nenhum usuário.
+- A sessão dura 12 horas. As senhas são guardadas com hash PBKDF2.
 
 Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2026.4.xlsm"`
 
@@ -15,21 +28,21 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 
 | Planilha | Sistema |
 |---|---|
-| MENU / botão "Localizar Estudante" | Painel + busca no topo, em toda a rede, por nome ou CPF |
-| CAD_ESCOLA | Escolas: cadastro com código SMTT, INEP e vínculo GEDUC |
-| ESCOLA (filtro avançado + colunas AG:AO) | Migração: cruzamento GEDUC × Censo × SMTT e CPF consolidado |
-| Botões CPF divergente / com CPF / sem CPF / duplicado / mãe não informada | Abas de filtro da Migração |
+| MENU / botão "Localizar Estudante" | Painel + busca no topo, por nome ou CPF (a instituição busca só nos próprios alunos) |
+| CAD_ESCOLA | Instituições: cadastro com código SMTT, INEP, vínculo GEDUC, acesso e bloqueio |
+| ESCOLA (filtro avançado + colunas AG:AO) | Matriculado: cruzamento GEDUC × Censo × SMTT × Status e CPF consolidado |
+| Botões CPF divergente / com CPF / sem CPF / duplicado / mãe não informada | Abas de filtro do Matriculado |
 | REL_SEM_CPF / REL_SEM_MAE / REL_SIMPLIFICADA | Relatórios para imprimir (o simplificado mostra o CPF mascarado) |
 | ALUNO + ENTRADA + NUM.CARACT | Remessa SMTT: arquivo `INST_<cód>_REM_<nº>.txt` em UTF-8 com BOM, 21 campos, 375 colunas |
-| AlunoCriticaUtf8.exe (validador oficial SMPE) | Criticar remessa: mesmas críticas de 0 a 17 e regras A a C, com relatório `CRITICA_*.txt` |
-| ORÇAMENTO | Orçamento: migrados × preço unitário + peticionamento − desconto |
+| AlunoCriticaUtf8.exe (validador oficial SMPE) | Criticar remessa: mesmas críticas de 0 a 17 e regras A a C, com relatório `CRITICA_*.txt`, mais a crítica 18 (mãe com nome e sobrenome) |
+| ORÇAMENTO | Orçamento (só administrador): migrados com CPF × preço unitário + peticionamento − desconto |
 | GEDUC, CENSO, SMTT, ALUNOS_POR_STATUS | Bases e importação |
 
 ## Regra do CPF consolidado (mesma fórmula da coluna AO)
 
-- Se as três fontes concordam, ou se duas concordam, vale a maioria.
-- Se só uma fonte tem CPF, vale essa fonte.
-- Se as fontes com CPF discordam entre si, o aluno fica como **DIVERGENTE**.
+- As fontes são GEDUC, Censo, SMTT e a base **Alunos por status** (a 4ª fonte, que também fornece o telefone).
+- Vale o CPF que aparece em mais fontes. Se só uma fonte tem CPF, vale essa fonte.
+- Se as fontes com CPF discordam entre si e nenhuma tem maioria (empate), o aluno fica como **DIVERGENTE**. Com três fontes, é a mesma fórmula da coluna AO.
 - A correção informada no sistema tem prioridade sobre as bases. Ela substitui o preenchimento em papel dos relatórios.
 - O cruzamento é feito pelo **nome do aluno**, como os PROCV da planilha. Quando há nomes iguais, o sistema escolhe o registro com a mesma data de nascimento.
 
@@ -38,6 +51,14 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 - Verificação dos dígitos do CPF, com a pendência **CPF inválido**.
 - CPF repetido entre alunos da mesma escola marcado como **CPF duplicado**.
 - Histórico de remessas. Cada aluno enviado fica marcado como migrado, e o orçamento conta os migrados reais.
+- **Mãe sem sobrenome**: o nome da mãe precisa ter nome e sobrenome (partículas como DA, DE e DOS não contam). O aluno sem isso não fica apto e, no arquivo, recebe a crítica 18.
+- **Correção e reprocessamento**: a instituição corrige qualquer campo do aluno (nome, CPF, mãe, pai, sexo, nascimento, série, turno, turma, matrícula, endereço, CEP, telefone e documentos). Os campos com problema aparecem destacados, e o aluno é reprocessado ao salvar.
+- **Cadastro individual**: a instituição cadastra, edita e exclui alunos que não estão no GEDUC (botão **Cadastrar aluno** no Matriculado). Esses alunos passam pelas mesmas regras e entram na remessa normalmente.
+- **Telefone**: vem da correção, do GEDUC (coluna `TELEFONE`), da base Alunos por status ou do SMTT, nessa ordem. O sistema usa o primeiro número válido do campo e completa o DDD 98 quando falta.
+- **CEP**: vem do GEDUC (coluna `CEP` ou `CEP_ALUNO`), a menos que a instituição corrija. Sem CEP, a remessa usa 65000000.
+- **Orçamento só com CPF**: a base do orçamento é o total de matriculados com CPF consolidado, e só contam os migrados com CPF.
+- **Arquivo do processamento final**: em Remessas, a instituição importa o TXT do processamento final junto com o PDF que contém os CPFs dos alunos (os dois são obrigatórios). Os arquivos ficam arquivados para download e não alteram a situação dos alunos.
+- **Suporte e identidade visual**: em Configurações, o administrador troca a logo, define o texto da opção **Suporte** e o número do **WhatsApp**, que aparece como botão logo abaixo do Suporte.
 - A remessa rejeita aluno sem CPF válido, sem data de nascimento ou de escola sem código SMTT, e avisa quando algum campo é truncado.
 
 ## Crítica da remessa (validador oficial SMPE)
@@ -59,6 +80,7 @@ As regras foram extraídas por análise estática do `AlunoCriticaUtf8.exe` (Mó
 | 13 | Nome do pai inválido |
 | 14–16 | CPF obrigatório, CPF duplicado e CPF inválido |
 | 17 | Linha com número de colunas diferente de 375 |
+| 18 | Nome da mãe com nome e sobrenome (regra do SIS SMPE, não existe no validador oficial) |
 
 Também são rejeitados arquivos que não estão em UTF-8 e arquivos com linhas em branco.
 
@@ -72,4 +94,4 @@ Na importação, o sistema corrige automaticamente os nomes com acentuação cor
 
 ## Dados
 
-O banco fica em `data/smpe.db` (SQLite). Quando a variável `DATABASE_URL` está definida (no Render, por exemplo), o sistema usa esse Postgres no lugar do SQLite. As bases têm dados pessoais de estudantes menores de idade. O servidor atende só este computador (127.0.0.1) e não tem login. Não exponha o sistema na rede sem antes incluir autenticação.
+O banco fica em `data/smpe.db` (SQLite). Quando a variável `DATABASE_URL` está definida (no Render, por exemplo), o sistema usa esse Postgres no lugar do SQLite. As bases têm dados pessoais de estudantes menores de idade. O acesso exige login (perfis administrador e instituição).

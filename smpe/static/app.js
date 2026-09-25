@@ -16,7 +16,11 @@ async function api(url, opts = {}) {
   if (!r.ok) {
     let msg = r.statusText;
     try { const j = await r.json(); msg = j.detail || msg; } catch {}
-    toast("Erro: " + msg); throw new Error(msg);
+    if (!opts.semLogin && (r.status === 401 || (r.status === 403 && msg.startsWith("Acesso da instituição bloqueado")))) {
+      mostrarLogin(url === "/api/sessao" ? "" : msg); throw new Error(msg);
+    }
+    if (!opts.semLogin) toast("Erro: " + msg);
+    throw new Error(msg);
   }
   return r.headers.get("content-type")?.includes("json") ? r.json() : r;
 }
@@ -26,20 +30,89 @@ function closeModal() { $("#modal").close(); }
 function drawer(html) { $("#drawerPanel").innerHTML = html; $("#drawer").classList.add("open"); }
 function closeDrawer() { $("#drawer").classList.remove("open"); }
 $("#drawer").addEventListener("click", e => { if (e.target.id === "drawer") closeDrawer(); });
+
+// ------------------------------------------------------------------ acesso (admin / instituicao)
+let SESSAO = null, PUBLICO = {};
+const ehAdmin = () => SESSAO?.perfil === "admin";
+const iniciais = n => (n || "?").split(/\s+/).filter(w => w.length > 2).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
+const waLink = n => `https://wa.me/${n.length <= 11 ? "55" + n : n}`;
+function mostrarLogin(msg = "") {
+  SESSAO = null; ESCOLAS = [];
+  const setup = !!PUBLICO.precisa_setup;
+  $("#loginTitulo").textContent = setup ? "Primeiro acesso" : "Entrar";
+  $("#loginSub").textContent = setup ? "Crie o login e a senha do administrador do sistema." : "Acesse com o login da sua instituição.";
+  $("#loginConf").hidden = !setup; $("#loginConf input").required = setup;
+  $("#loginBtn").textContent = setup ? "Criar administrador" : "Entrar";
+  $("#loginMsg").textContent = msg; $("#loginMsg").hidden = !msg;
+  closeDrawer(); if ($("#modal").open) closeModal();
+  $("#login").hidden = false;
+}
+$("#loginForm").onsubmit = async ev => {
+  ev.preventDefault();
+  const f = Object.fromEntries(new FormData(ev.target)), erro = m => { $("#loginMsg").textContent = m; $("#loginMsg").hidden = false; };
+  if (PUBLICO.precisa_setup && f.senha !== f.senha2) return erro("As senhas não conferem.");
+  try { SESSAO = await api(PUBLICO.precisa_setup ? "/api/setup" : "/api/login", {method: "POST", body: {login: f.login, senha: f.senha}, semLogin: true}); }
+  catch (e) { return erro(e.message); }
+  PUBLICO.precisa_setup = false; ev.target.reset(); entrar();
+};
+function entrar() {
+  $("#login").hidden = true;
+  document.body.classList.toggle("inst", !ehAdmin());
+  const nome = ehAdmin() ? "Administrador" : SESSAO.escola_nome;
+  $("#userNome").textContent = nome; $("#userNome").title = nome;
+  $("#userPerfil").textContent = ehAdmin() ? `${SESSAO.login} · acesso total` : `Instituição · ${SESSAO.login}`;
+  $("#userAv").textContent = iniciais(nome);
+  $("#buscaInput").placeholder = ehAdmin() ? "Localizar estudante por nome ou CPF…" : "Localizar estudante da instituição…";
+  router();
+}
+function aplicarPublico() {
+  const wa = PUBLICO.whatsapp;
+  $("#waBtn").hidden = !wa; if (wa) $("#waBtn").href = waLink(wa);
+  $("#loginSup").innerHTML = `<a href="#" data-sup>Suporte</a>${wa ? `<a href="${waLink(wa)}" target="_blank" rel="noopener">Suporte via WhatsApp</a>` : ""}`;
+}
+function suporte() {
+  const wa = PUBLICO.whatsapp, txt = PUBLICO.suporte_texto;
+  modal(`<div class="mh"><h2>Suporte</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <div class="mb"><p style="white-space:pre-line;margin-top:0">${esc(txt) || "Em caso de dúvidas ou problemas no sistema, entre em contato com a equipe responsável pelo SIS SMPE."}</p>
+      ${wa ? `<a class="btn primary" href="${waLink(wa)}" target="_blank" rel="noopener"><svg class="i"><use href="#i-whatsapp"/></svg>Falar pelo WhatsApp</a>` : ""}</div>`);
+}
+$("#supBtn").onclick = e => { e.preventDefault(); suporte(); };
+$("#loginSup").onclick = e => { if (e.target.matches("[data-sup]")) { e.preventDefault(); suporte(); } };
+$("#userBtn").onclick = e => { e.stopPropagation(); $("#userMenu").hidden = !$("#userMenu").hidden; };
+document.addEventListener("click", () => { $("#userMenu").hidden = true; });
+$("#sairBtn").onclick = async () => { await api("/api/logout", {method: "POST"}); location.hash = ""; mostrarLogin(); };
+$("#senhaBtn").onclick = () => {
+  modal(`<div class="mh"><h2>Alterar senha</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form id="fSenha"><div class="mb form">
+      <div class="full"><label>Senha atual</label><input name="atual" type="password" required autocomplete="current-password"></div>
+      <div><label>Nova senha (mín. 6 caracteres)</label><input name="nova" type="password" minlength="6" required autocomplete="new-password"></div>
+      <div><label>Confirme a nova senha</label><input name="nova2" type="password" required autocomplete="new-password"></div>
+    </div><div class="mf"><button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
+  $("#fSenha").onsubmit = async ev => {
+    ev.preventDefault();
+    const f = Object.fromEntries(new FormData(ev.target));
+    if (f.nova !== f.nova2) return toast("As senhas não conferem");
+    await api("/api/senha", {method: "PUT", body: {atual: f.atual, nova: f.nova}});
+    closeModal(); toast("Senha alterada");
+  };
+};
+const refreshLogo = () => $$("img.logo-img, .doc-head img").forEach(i => i.src = "/api/logo?t=" + Date.now());
 $("#menuBtn").onclick = () => $(".side").classList.toggle("open");
 
 const PEND = {
   sem_cpf: ["Sem CPF", "b-warn"], divergente: ["CPF divergente", "b-err"], cpf_invalido: ["CPF inválido", "b-err"],
   cpf_duplicado: ["CPF duplicado", "b-err"], nome_duplicado: ["Nome duplicado", "b-warn"], sem_mae: ["Sem mãe", "b-warn"],
+  mae_incompleta: ["Mãe sem sobrenome", "b-warn"],
   critica_smtt: ["Crítica SMTT", "b-err"],
 };
 // legenda do validador oficial SMPE (AlunoCriticaUtf8.exe)
-const LEGENDA = {0: "Escola deve ser informada e ser um número inteiro", 1: "Nome do aluno deve ser informado",
+const LEGENDA = {0: "Instituição deve ser informada e ser um número inteiro", 1: "Nome do aluno deve ser informado",
   2: "Nome da mãe deve ser informado", 3: "Sexo deve ser M ou F", 4: "Curso deve ser informado",
   5: "Grau deve ser de 1 a 3", 6: "Série/período deve ser de 1 a 9", 7: "Turno deve ser M, V, N ou I",
   8: "Matrícula deve ser informada", 9: "Data de nascimento válida com 8 dígitos", 10: "Endereço deve ser informado",
   11: "Bairro deve ser informado", 12: "Cidade deve ser informada", 13: "Nome do pai inválido", 14: "CPF é requerido",
-  15: "CPF duplicado", 16: "CPF inválido", 17: "Quantidade de colunas diferente do layout (375)"};
+  15: "CPF duplicado", 16: "CPF inválido", 17: "Quantidade de colunas diferente do layout (375)",
+  18: "Nome da mãe deve ter nome e sobrenome (regra do SIS SMPE)"};
 const codBadges = cs => (cs || []).map(k => `<span class="badge b-err" title="${esc(LEGENDA[k])}">(${k}) ${esc(LEGENDA[k])}</span>`).join("");
 const pendBadges = (p, crit) => p.map(k => k === "critica_smtt" && crit?.length
   ? `<span class="badge b-err" title="${esc(crit.map(x => `(${x}) ${LEGENDA[x]}`).join("\n"))}">Crítica SMTT ${crit.map(x => `(${x})`).join("")}</span>`
@@ -88,27 +161,33 @@ document.addEventListener("change", e => {
 let ESCOLAS = [];
 async function loadEscolas() { ESCOLAS = await api("/api/escolas"); return ESCOLAS; }
 function escolaSelect(id, sel) {
-  return `<select id="${id}"><option value="">Selecione a escola…</option>${ESCOLAS.map(e =>
+  return `<select id="${id}"><option value="">Selecione a instituição…</option>${ESCOLAS.map(e =>
     `<option value="${e.id}" ${+sel === e.id ? "selected" : ""}>${e.id} · ${esc(e.nome)}</option>`).join("")}</select>`;
 }
 const lembrarEscola = id => { try { localStorage.setItem("smpe.escola", id); } catch {} };
-const ultimaEscola = () => { try { return localStorage.getItem("smpe.escola") || ""; } catch { return ""; } };
+const ultimaEscola = () => {
+  if (SESSAO && !ehAdmin()) return String(SESSAO.escola_id);
+  try { return localStorage.getItem("smpe.escola") || ""; } catch { return ""; }
+};
 
 // ------------------------------------------------------------------ roteador
-const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca};
-const TITLES = {painel: "Painel", migracao: "Migração por escola", escolas: "Cadastro de escolas", remessas: "Remessas SMTT", critica: "Criticar remessa",
-  relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante"};
-const CRUMBS = {painel: "Visão geral da migração nas escolas", migracao: "Cruzamento de CPF GEDUC × Censo × SMTT",
-  escolas: "Unidades de ensino e vínculo com o GEDUC", remessas: "Arquivos enviados ao banco de dados da SMTT", critica: "Mesmas regras do validador oficial SMPE (AlunoCritica)",
-  relatorios: "Listas para conferência e preenchimento pela escola", orcamento: "Valores por escola",
-  bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal"};
+const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config};
+const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config"]);
+const TITLES = {painel: "Painel", migracao: "Matriculado", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
+  relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante", config: "Configurações"};
+const CRUMBS = {painel: "Visão geral da migração nas instituições", migracao: "Alunos matriculados · cruzamento de CPF GEDUC × Censo × SMTT × Status",
+  escolas: "Instituições de ensino, acesso e vínculo com o GEDUC", remessas: "Arquivos enviados ao banco de dados da SMTT", critica: "Mesmas regras do validador oficial SMPE (AlunoCritica)",
+  relatorios: "Listas para conferência e preenchimento pela instituição", orcamento: "Valores por instituição (somente alunos com CPF)",
+  bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte e orçamento"};
 async function router() {
+  if (!SESSAO) return;
   const [path, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
-  const [nome = "painel", arg] = path.split("/");
+  let [nome = "painel", arg] = path.split("/");
+  if (SO_ADMIN.has(nome) && !ehAdmin()) nome = "painel";
   const fn = ROUTES[nome] || painel;
   $$("#nav a").forEach(a => a.classList.toggle("active", a.dataset.r === nome));
   $("#title").textContent = TITLES[nome] || "Painel";
-  $("#crumb").textContent = CRUMBS[nome] || "SIS SMPE";
+  $("#crumb").textContent = nome === "busca" && !ehAdmin() ? SESSAO.escola_nome : CRUMBS[nome] || "SIS SMPE";
   $(".side").classList.remove("open");
   closeDrawer();
   $("#view").innerHTML = `<div class="empty">Carregando…</div>`;
@@ -126,38 +205,39 @@ async function painel() {
   const semBase = !d.bases.geduc;
   $("#view").innerHTML = `
     ${semBase ? `<div class="alert warn">Nenhuma base importada ainda. Vá em <a href="#/bases">Bases e importação</a> e envie a planilha SIS SMPE.</div>` : ""}
-    ${t.sem_vinculo ? `<div class="alert warn">${t.sem_vinculo} escola(s) sem alunos encontrados no GEDUC — confira o vínculo em <a href="#/escolas">Escolas</a>.</div>` : ""}
+    ${t.sem_vinculo ? `<div class="alert warn">${t.sem_vinculo} instituição(ões) sem alunos encontrados no GEDUC${ehAdmin() ? ` — confira o vínculo em <a href="#/escolas">Instituições</a>` : ""}.</div>` : ""}
     <div class="grid kpis k4">
-      <div class="kpi"><div class="l">Escolas</div><div class="v">${fmtN(t.escolas)}</div></div>
+      ${ehAdmin() ? `<div class="kpi"><div class="l">Instituições</div><div class="v">${fmtN(t.escolas)}</div></div>`
+        : `<div class="kpi ok"><div class="l">Aptos para a remessa</div><div class="v">${fmtN(t.aptos)}</div></div>`}
       <div class="kpi hero"><div class="l">Matriculados (GEDUC)</div><div class="v">${fmtN(t.matriculados)}</div></div>
       <div class="kpi ok"><div class="l">Com CPF consolidado</div><div class="v">${fmtN(t.com_cpf)}</div><div class="s">${fmtPct(t.indice_cpf)}</div></div>
       <div class="kpi warn"><div class="l">Sem CPF</div><div class="v">${fmtN(t.sem_cpf)}</div></div>
       <div class="kpi err"><div class="l">CPF divergente</div><div class="v">${fmtN(t.divergentes)}</div></div>
       <div class="kpi err"><div class="l">CPF inválido</div><div class="v">${fmtN(t.cpf_invalido)}</div></div>
-      <div class="kpi"><div class="l">Sem mãe</div><div class="v">${fmtN(t.sem_mae)}</div></div>
+      <div class="kpi"><div class="l">Sem mãe / sem sobrenome</div><div class="v">${fmtN(t.sem_mae + t.mae_incompleta)}</div></div>
       <div class="kpi ok"><div class="l">Migrados p/ SMTT</div><div class="v">${fmtN(t.migrados)}</div><div class="s">${fmtN(d.lotes.n)} remessa(s)</div></div>
     </div>
     <div class="card">
-      <div class="card-h"><h2>Situação por escola</h2><span class="spacer"></span>
-        <input id="fEsc" placeholder="Filtrar escola…" style="width:240px"></div>
+      <div class="card-h"><h2>Situação por instituição</h2><span class="spacer"></span>
+        <input id="fEsc" placeholder="Filtrar instituição…" style="width:240px"></div>
       <div class="table-wrap" style="max-height:none"><table id="tbEsc"><thead><tr>
-        <th>ID</th><th>Escola</th><th>Cód. SMTT</th><th class="num">Matric.</th><th class="num">Com CPF</th><th>Índice CPF</th>
+        <th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th class="num">Matric.</th><th class="num">Com CPF</th><th>Índice CPF</th>
         <th class="num">Sem CPF</th><th class="num">Diverg.</th><th class="num">Sem mãe</th><th class="num">Aptos</th><th class="num">Migrados</th>
       </tr></thead><tbody id="tbEscBody"></tbody></table></div><div id="pgEsc"></div>
     </div>
     <p class="muted" style="margin-top:12px">Bases: GEDUC ${fmtN(d.bases.geduc)} · Censo ${fmtN(d.bases.censo)} · SMTT ${fmtN(d.bases.smtt)} · Alunos por status ${fmtN(d.bases.status_alunos)}</p>`;
   $("#tbEsc").onclick = e => { const tr = e.target.closest("tr[data-id]"); if (tr) location.hash = "#/migracao/" + tr.dataset.id; };
   const rowEsc = e => `<tr class="click" data-id="${e.id}" data-n="${esc(e.nome.toLowerCase())}">
-        <td>${e.id}</td><td>${esc(e.nome)} ${e.matriculados ? "" : `<span class="badge b-warn">sem vínculo GEDUC</span>`}</td>
+        <td>${e.id}</td><td>${esc(e.nome)} ${e.matriculados ? "" : `<span class="badge b-warn">sem vínculo GEDUC</span>`}${e.bloqueado ? `<span class="badge b-err">bloqueada</span>` : ""}</td>
         <td class="mono">${esc(e.cod_smtt) || `<span class="badge b-err">sem código</span>`}</td>
         <td class="num">${fmtN(e.matriculados)}</td><td class="num">${fmtN(e.com_cpf)}</td>
         <td><div class="row" style="gap:6px;flex-wrap:nowrap"><div class="bar"><span style="width:${e.indice_cpf * 100}%"></span></div><span class="muted">${fmtPct(e.indice_cpf)}</span></div></td>
         <td class="num">${e.sem_cpf || ""}</td><td class="num">${e.divergentes ? `<b style="color:var(--err)">${e.divergentes}</b>` : ""}</td>
-        <td class="num">${e.sem_mae || ""}</td><td class="num">${fmtN(e.aptos)}</td><td class="num">${e.migrados ? fmtN(e.migrados) : ""}</td>
+        <td class="num">${(e.sem_mae + e.mae_incompleta) || ""}</td><td class="num">${fmtN(e.aptos)}</td><td class="num">${e.migrados ? fmtN(e.migrados) : ""}</td>
       </tr>`;
   const renderEsc = () => {
     const q = $("#fEsc").value.toLowerCase(), pg = paginar("painel", d.escolas.filter(e => e.nome.toLowerCase().includes(q)), renderEsc);
-    $("#tbEscBody").innerHTML = pg.itens.map(rowEsc).join("") || `<tr><td colspan="11" class="empty">Nenhuma escola encontrada.</td></tr>`;
+    $("#tbEscBody").innerHTML = pg.itens.map(rowEsc).join("") || `<tr><td colspan="11" class="empty">Nenhuma instituição encontrada.</td></tr>`;
     $("#pgEsc").innerHTML = pg.html;
   };
   $("#fEsc").oninput = () => { resetPag("painel"); renderEsc(); };
@@ -171,13 +251,15 @@ const FILTROS = [
   ["divergente", "CPF divergente", a => a.pendencias.includes("divergente")], ["cpf_invalido", "CPF inválido", a => a.pendencias.includes("cpf_invalido")],
   ["cpf_duplicado", "CPF duplicado", a => a.pendencias.includes("cpf_duplicado")], ["nome_duplicado", "Nome duplicado", a => a.pendencias.includes("nome_duplicado")],
   ["sem_mae", "Sem mãe", a => a.pendencias.includes("sem_mae")],
+  ["mae_incompleta", "Mãe sem sobrenome", a => a.pendencias.includes("mae_incompleta")],
   ["critica_smtt", "Crítica SMTT", a => a.pendencias.includes("critica_smtt")],
+  ["manuais", "Cadastro individual", a => a.manual],
 ];
 let MIG = null;
 async function migracao(eid) {
   eid = eid || ultimaEscola();
   if (!eid) {
-    $("#view").innerHTML = `<div class="card card-b"><label>Escola</label>${escolaSelect("selEsc")}</div>`;
+    $("#view").innerHTML = `<div class="card card-b"><label>Instituição</label>${escolaSelect("selEsc")}</div>`;
     $("#selEsc").onchange = e => location.hash = "#/migracao/" + e.target.value;
     return;
   }
@@ -190,15 +272,16 @@ async function migracao(eid) {
     <div class="row" style="margin-bottom:14px"><div style="min-width:320px;flex:1;max-width:560px">${escolaSelect("selEsc", eid)}</div>
       <span class="muted">Cód. SMTT <b class="mono">${esc(e.cod_smtt) || "—"}</b> · INEP <b class="mono">${esc(e.inep) || "—"}</b></span>
       <span class="spacer"></span>
-      <a class="btn" href="#/relatorios/${eid}">Relatórios</a><a class="btn" href="#/orcamento/${eid}">Orçamento</a></div>
-    ${!r.matriculados ? `<div class="alert warn">Nenhum aluno do GEDUC encontrado para esta escola. Ajuste o <b>vínculo GEDUC</b> em <a href="#/escolas">Escolas</a>.</div>` : ""}
-    ${!e.cod_smtt ? `<div class="alert warn">Escola sem código SMTT: a remessa exige o código da instituição (4 dígitos).</div>` : ""}
+      <button id="btnNovoAluno">Cadastrar aluno</button>
+      <a class="btn" href="#/relatorios/${eid}">Relatórios</a><a class="btn" href="#/orcamento/${eid}" data-admin>Orçamento</a></div>
+    ${!r.matriculados ? `<div class="alert warn">Nenhum aluno do GEDUC encontrado para esta instituição.${ehAdmin() ? ` Ajuste o <b>vínculo GEDUC</b> em <a href="#/escolas">Instituições</a>.` : ""}</div>` : ""}
+    ${!e.cod_smtt ? `<div class="alert warn">Instituição sem código SMTT: a remessa exige o código da instituição (4 dígitos).</div>` : ""}
     <div class="grid kpis">
       <div class="kpi hero"><div class="l">Matriculados</div><div class="v">${fmtN(r.matriculados)}</div></div>
       <div class="kpi ok"><div class="l">Com CPF</div><div class="v">${fmtN(r.com_cpf)}</div><div class="s">índice ${fmtPct(r.indice_cpf)}</div></div>
       <div class="kpi warn"><div class="l">Sem CPF</div><div class="v">${fmtN(r.sem_cpf)}</div></div>
       <div class="kpi err"><div class="l">CPF divergente</div><div class="v">${fmtN(r.divergentes)}</div><div class="s">${fmtPct(r.indice_divergencia)}</div></div>
-      <div class="kpi"><div class="l">Sem mãe</div><div class="v">${fmtN(r.sem_mae)}</div></div>
+      <div class="kpi"><div class="l">Sem mãe / sem sobrenome</div><div class="v">${fmtN(r.sem_mae + r.mae_incompleta)}</div></div>
       <div class="kpi ok"><div class="l">Aptos / migrados</div><div class="v">${fmtN(r.aptos)}</div><div class="s">${fmtN(r.migrados)} já migrados</div></div>
     </div>
     <div class="card">
@@ -212,7 +295,7 @@ async function migracao(eid) {
       </div>
       <div class="table-wrap"><table><thead><tr>
         <th><input type="checkbox" id="chkAll" style="width:auto" title="Marcar/desmarcar todos os alunos do filtro atual (todas as páginas)"></th><th>Aluno</th><th>Nasc.</th><th>Turma / turno</th><th>Mãe</th>
-        <th>CPF GEDUC</th><th>CPF Censo</th><th>CPF SMTT</th><th>CPF consolidado</th><th>Pendências</th><th>SMTT</th>
+        <th>CPF consolidado</th><th>Pendências</th><th>CPF GEDUC</th><th>CPF Censo</th><th>CPF SMTT</th><th>CPF Status</th><th>SMTT</th>
       </tr></thead><tbody id="tbAlunos"></tbody></table></div><div id="pgAlunos"></div>
     </div>`;
   $("#selEsc").onchange = ev => location.hash = "#/migracao/" + ev.target.value;
@@ -221,6 +304,7 @@ async function migracao(eid) {
   $("#btnSelAptos").onclick = () => { d.alunos.filter(a => a.apto && !a.migrado).forEach(a => MIG.sel.add(a.id_aluno)); renderAlunos(); };
   $("#chkAll").onchange = ev => { visiveis().forEach(a => ev.target.checked ? MIG.sel.add(a.id_aluno) : MIG.sel.delete(a.id_aluno)); renderAlunos(); };
   $("#btnRemessa").onclick = () => previaRemessa(eid, [...MIG.sel]);
+  $("#btnNovoAluno").onclick = () => novoAluno(eid);
   $("#tbAlunos").onclick = ev => {
     if (ev.target.type === "checkbox") { ev.target.checked ? MIG.sel.add(ev.target.value) : MIG.sel.delete(ev.target.value); updSel(); return; }
     const tr = ev.target.closest("tr[data-id]"); if (tr) abrirAluno(tr.dataset.id);
@@ -244,57 +328,116 @@ function renderAlunos() {
   const cpfCell = (c, ref) => c ? `<span class="mono ${ref && c !== ref ? "cpf-div" : ""}">${fmtCPF(c)}</span>` : `<span class="muted">—</span>`;
   $("#tbAlunos").innerHTML = lista.length ? pg.itens.map(a => `<tr class="click" data-id="${esc(a.id_aluno)}">
     <td><input type="checkbox" value="${esc(a.id_aluno)}" ${MIG.sel.has(a.id_aluno) ? "checked" : ""} style="width:auto"></td>
-    <td><b>${esc(a.aluno)}</b>${a.situacao ? `<div class="muted">${esc(a.situacao)}</div>` : ""}</td>
+    <td><b>${esc(a.aluno)}</b>${a.manual ? ` <span class="badge b-info" title="Cadastrado individualmente pela instituição">individual</span>` : ""}${a.situacao ? `<div class="muted">${esc(a.situacao)}</div>` : ""}</td>
     <td>${fmtData(a.dt_nasc)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td>
     <td>${esc(a.mae) || `<span class="muted">—</span>`}</td>
-    <td>${cpfCell(a.cpf_geduc, a.cpf)}</td><td>${cpfCell(a.cpf_censo, a.cpf)}</td><td>${cpfCell(a.cpf_smtt, a.cpf)}</td>
     <td>${a.cpf === "DIVERGENTE" ? `<span class="badge b-err">DIVERGENTE</span>` : a.cpf ? `<b class="mono">${fmtCPF(a.cpf)}</b>${a.cpf_manual ? ` <span class="badge b-info" title="Informado manualmente">manual</span>` : ""}` : `<span class="muted">—</span>`}</td>
-    <td>${pendBadges(a.pendencias, a.criticas)}</td>
+    <td><div class="pend-cell">${pendBadges(a.pendencias, a.criticas)}${a.pendencias.length ? `<button class="btn-sm" title="Editar a informação incorreta e reprocessar">Corrigir</button>` : ""}</div></td>
+    <td>${cpfCell(a.cpf_geduc, a.cpf)}</td><td>${cpfCell(a.cpf_censo, a.cpf)}</td><td>${cpfCell(a.cpf_smtt, a.cpf)}</td><td>${cpfCell(a.cpf_status, a.cpf)}</td>
     <td>${a.migrado ? `<span class="badge b-ok">migrado</span>` : a.no_smtt ? `<span class="badge b-mute">já na base SMTT</span>` : ""}</td>
-  </tr>`).join("") : `<tr><td colspan="11" class="empty">Nenhum aluno neste filtro.</td></tr>`;
+  </tr>`).join("") : `<tr><td colspan="12" class="empty">Nenhum aluno neste filtro.</td></tr>`;
   $("#pgAlunos").innerHTML = pg.html;
   updSel();
 }
 
+// campos do aluno (correcao da instituicao ou cadastro individual): [nome, rotulo, tipo, classe]
+const CAMPOS_ALUNO = [
+  ["Identificação"], ["aluno", "Nome do aluno", "text", "full"], ["cpf", "CPF", "cpf"], ["dt_nasc", "Data de nascimento", "date"],
+  ["genero", "Sexo", "sexo"], ["telefone", "Telefone", "text"],
+  ["Filiação"], ["mae", "Nome da mãe (nome e sobrenome)", "text", "full"], ["pai", "Nome do pai", "text", "full"],
+  ["Dados escolares"], ["ano_serie", "Série / ano", "text"], ["turno", "Turno", "turno"], ["turma", "Turma", "text"], ["matricula", "Matrícula", "text"],
+  ["Endereço"], ["rua", "Endereço (rua)", "text", "full"], ["numero", "Número", "text"], ["bairro", "Bairro", "text"],
+  ["cidade", "Cidade", "text"], ["cep", "CEP", "text"],
+  ["Documentos"], ["rg", "RG", "text"], ["org_exp", "Órgão expedidor", "text"], ["data_exp", "Data de expedição", "date"],
+];
+// campo com problema, a partir das pendencias e dos codigos de critica
+const CRIT_CAMPO = {1: "aluno", 3: "genero", 6: "ano_serie", 7: "turno", 8: "matricula", 9: "dt_nasc", 10: "rua", 11: "bairro", 12: "cidade", 13: "pai"};
+function camposComErro(a) {
+  if (!a) return new Set();
+  const s = new Set((a.criticas || []).map(c => CRIT_CAMPO[c]).filter(Boolean));
+  if (a.pendencias.some(p => ["sem_cpf", "divergente", "cpf_invalido", "cpf_duplicado"].includes(p))) s.add("cpf");
+  if (a.pendencias.some(p => ["sem_mae", "mae_incompleta"].includes(p))) s.add("mae");
+  return s;
+}
+function formAluno(vals, base, erros, extra = "") {
+  const ph = k => base[k] ? `base: ${k === "cpf" ? fmtCPF(base[k]) : k.includes("dt") ? fmtData(base[k]) : base[k]}` : "";
+  const sel = (k, ops) => `<select name="${k}"><option value="">${esc(ph(k) || "—")}</option>${ops.map(([v, l]) => `<option value="${v}" ${(vals[k] || "").toUpperCase().startsWith(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  return CAMPOS_ALUNO.map(([k, l, t, cls]) => !l ? `<h3 class="full" style="margin:8px 0 0">${k}</h3>` :
+    `<div class="${cls || ""} ${erros.has(k) ? "campo-err" : ""}"><label>${l}</label>${
+      t === "sexo" ? sel(k, [["M", "Masculino"], ["F", "Feminino"]]) :
+      t === "turno" ? sel(k, [["M", "Matutino"], ["V", "Vespertino"], ["N", "Noturno"], ["I", "Integral"]]) :
+      `<input name="${k}" type="${t === "date" ? "date" : "text"}" value="${esc(t === "cpf" ? fmtCPF(vals[k] || "") : vals[k] || "")}" placeholder="${esc(ph(k))}">`}</div>`).join("") + extra;
+}
+// depois de salvar: recarrega a lista (reprocessa pendencias e criticas) e reabre o aluno
+async function reprocessar(id) {
+  if (!MIG) { toast("Salvo"); closeDrawer(); return; }
+  await migracao(MIG.eid);
+  const a = MIG.d.alunos.find(x => x.id_aluno === id);
+  if (!a) { toast("Salvo"); closeDrawer(); return; }
+  toast(a.apto ? "Reprocessado: aluno apto para a remessa" : `Reprocessado: ainda com ${a.pendencias.length} pendência(s)`);
+  abrirAluno(id);
+}
+async function novoAluno(eid) {
+  drawer(`<div class="dh"><div style="flex:1"><h2>Cadastrar aluno</h2><div class="muted">Cadastro individual, fora da base GEDUC</div></div>
+      <button onclick="closeDrawer()">Fechar</button></div>
+    <div class="db"><form id="fNovo" class="form">${formAluno({cidade: "SAO LUIS"}, {}, new Set())}
+      <div class="full row"><button class="primary">Cadastrar e processar</button></div></form></div>`);
+  $("#fNovo [name=aluno]").required = true;
+  $("#fNovo").onsubmit = async ev => {
+    ev.preventDefault();
+    const r = await api(`/api/escolas/${eid}/alunos`, {method: "POST", body: Object.fromEntries(new FormData(ev.target))});
+    reprocessar(r.id_aluno);
+  };
+}
+
 async function abrirAluno(id) {
   const [d, a] = [await api(`/api/alunos/${encodeURIComponent(id)}`), MIG?.d.alunos.find(x => x.id_aluno === id)];
-  const g = d.geduc, aj = d.ajuste || {};
+  const g = d.geduc, aj = d.ajuste || {}, manual = !!g.manual, erros = camposComErro(a);
   const src = (t, rows, f) => `<h3>${t}</h3>` + (rows.length ? rows.map(f).join("<hr style='border:0;border-top:1px dashed var(--line)'>") : `<p class="muted">Não encontrado nesta base (cruzamento por nome).</p>`);
-  drawer(`<div class="dh"><div style="flex:1"><h2>${esc(g.aluno)}</h2><div class="muted">${esc(g.escola)} · ${esc(g.turma)} · ID ${esc(g.id_aluno)}</div>
-      ${a ? `<div style="margin-top:6px">${pendBadges(a.pendencias, a.criticas)}${a.migrado ? `<span class="badge b-ok">migrado</span>` : ""}</div>` : ""}</div>
+  const vals = manual ? g : aj;
+  drawer(`<div class="dh"><div style="flex:1"><h2>${esc(a?.aluno || g.aluno)}</h2><div class="muted">${manual ? "Cadastro individual" : esc(g.escola)} · ${esc(g.turma)} · ID ${esc(g.id_aluno)}</div>
+      ${a ? `<div style="margin-top:6px">${pendBadges(a.pendencias, a.criticas)}${a.migrado ? `<span class="badge b-ok">migrado</span>` : ""}${a.apto ? `<span class="badge b-ok">apto</span>` : ""}</div>` : ""}</div>
       <button onclick="closeDrawer()">Fechar</button></div>
     <div class="db">
       ${a ? `<div class="alert ${a.cpf === "DIVERGENTE" ? "warn" : "info"}">CPF consolidado: <b class="mono">${a.cpf === "DIVERGENTE" ? "DIVERGENTE" : fmtCPF(a.cpf) || "—"}</b>
         ${a.cpf === "DIVERGENTE" ? " — as bases discordam; informe o CPF correto abaixo." : ""}</div>
         ${a.criticas.length ? `<div class="alert warn"><b>Será rejeitado pelo validador SMTT:</b><br>${a.criticas.map(x => `(${x}) ${esc(LEGENDA[x])}`).join("<br>")}
-          <br><small>Corrija no GEDUC e reimporte a base (endereço, bairro, série, sexo, turno, nascimento).</small></div>` : ""}` : ""}
-      <h3>Correções da escola</h3>
+          <br><small>Corrija os campos destacados abaixo e clique em “Salvar e reprocessar”.</small></div>` : ""}` : ""}
+      <h3>${manual ? "Cadastro do aluno" : "Correções da instituição"}</h3>
+      ${manual ? "" : `<p class="muted" style="margin-top:0">Preencha só o que estiver incorreto. Os campos vazios usam o valor das bases (mostrado em cinza).</p>`}
       <form id="fAj" class="form">
-        <div><label>CPF correto</label><input name="cpf" value="${esc(fmtCPF(aj.cpf || ""))}" placeholder="000.000.000-00"></div>
-        <div><label>Telefone</label><input name="telefone" value="${esc(aj.telefone || "")}"></div>
-        <div class="full"><label>Nome da mãe</label><input name="mae" value="${esc(aj.mae || "")}" placeholder="${esc(g.mae || "Não informada no GEDUC")}"></div>
-        <div><label>RG</label><input name="rg" value="${esc(aj.rg || "")}"></div>
-        <div><label>Órgão expedidor</label><input name="org_exp" value="${esc(aj.org_exp || "")}" placeholder="SSP"></div>
-        <div><label>Data de expedição</label><input type="date" name="data_exp" value="${esc(aj.data_exp || "")}"></div>
-        <div class="full"><label>Observação</label><input name="obs" value="${esc(aj.obs || "")}"></div>
-        <div class="full row"><button class="primary">Salvar correções</button>${d.ajuste ? `<button type="button" class="danger" id="limparAj">Remover correções</button>` : ""}
-          <span class="muted">Correções têm prioridade sobre as bases.</span></div>
+        ${formAluno(vals, manual ? {} : {...g, telefone: a?.telefone || "", rg: a?.rg || "", org_exp: a?.org_exp || "", data_exp: a?.data_exp || "", matricula: a?.matricula || ""}, erros,
+          manual ? "" : `<div class="full"><label>Observação</label><input name="obs" value="${esc(aj.obs || "")}"></div>`)}
+        <div class="full row"><button class="primary">Salvar e reprocessar</button>
+          ${manual ? `<button type="button" class="danger" id="excluirAluno">Excluir aluno</button>`
+            : d.ajuste ? `<button type="button" class="danger" id="limparAj">Remover correções</button>` : ""}
+          <span class="muted">${manual ? "" : "Correções têm prioridade sobre as bases."}</span></div>
       </form>
-      ${src("GEDUC", [g], x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Nascimento</dt><dd>${fmtData(x.dt_nasc)}</dd>
+      ${manual ? "" : src("GEDUC", [g], x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Nascimento</dt><dd>${fmtData(x.dt_nasc)}</dd>
         <dt>Mãe</dt><dd>${esc(x.mae) || "—"}</dd><dt>Pai</dt><dd>${esc(x.pai) || "—"}</dd><dt>Série/turno</dt><dd>${esc(x.ano_serie)} · ${esc(x.turno)}</dd>
-        <dt>Endereço</dt><dd>${esc([x.rua, x.numero, x.bairro, x.cidade, x.cep].filter(Boolean).join(", "))}</dd></dl>`)}
+        <dt>Endereço</dt><dd>${esc([x.rua, x.numero, x.bairro, x.cidade].filter(Boolean).join(", "))}</dd><dt>CEP</dt><dd class="mono">${esc(x.cep) || "—"}</dd>
+        <dt>Telefone</dt><dd>${esc(x.telefone) || "—"}</dd></dl>`)}
       ${src("Censo escolar", d.censo, x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Nascimento</dt><dd>${fmtData(x.dt_nasc)}</dd><dt>ID INEP</dt><dd class="mono">${esc(x.id_inep)}</dd><dt>Cor/raça</dt><dd>${esc(x.cor)}</dd></dl>`)}
-      ${src("SMTT", d.smtt, x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Escola</dt><dd>${esc(x.escola)}</dd><dt>Cartão</dt><dd class="mono">${esc(x.cartao) || "—"}</dd>
+      ${src("SMTT", d.smtt, x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Instituição</dt><dd>${esc(x.escola)}</dd><dt>Cartão</dt><dd class="mono">${esc(x.cartao) || "—"}</dd>
         <dt>RG</dt><dd>${esc(x.rg) || "—"} ${esc(x.org_exp)}</dd><dt>Celular</dt><dd>${esc(x.celular || x.telefone) || "—"}</dd><dt>Cadastrado</dt><dd>${esc(x.cadastrado)}</dd></dl>`)}
+      ${src("Alunos por status", d.status, x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Situação</dt><dd>${esc(x.situacao) || "—"}</dd>
+        <dt>Telefone</dt><dd>${esc(x.telefone) || "—"}</dd><dt>Mãe</dt><dd>${esc(x.mae) || "—"}</dd></dl>`)}
       ${d.lotes.length ? `<h3>Remessas</h3>${d.lotes.map(l => `<div>#${l.id} · ${esc(l.criado_em)} · <a href="/api/lotes/${l.id}/arquivo">${esc(l.arquivo)}</a></div>`).join("")}` : ""}
     </div>`);
   $("#fAj").onsubmit = async ev => {
     ev.preventDefault();
-    await api(`/api/alunos/${encodeURIComponent(id)}/ajuste`, {method: "PUT", body: Object.fromEntries(new FormData(ev.target))});
-    toast("Correções salvas"); closeDrawer(); if (MIG) migracao(MIG.eid);
+    const body = Object.fromEntries(new FormData(ev.target));
+    if (manual) await api(`/api/alunos-manuais/${g.id}`, {method: "PUT", body});
+    else await api(`/api/alunos/${encodeURIComponent(id)}/ajuste`, {method: "PUT", body});
+    reprocessar(id);
   };
   const lim = $("#limparAj");
-  if (lim) lim.onclick = async () => { await api(`/api/alunos/${encodeURIComponent(id)}/ajuste`, {method: "PUT", body: {}}); toast("Correções removidas"); closeDrawer(); if (MIG) migracao(MIG.eid); };
+  if (lim) lim.onclick = async () => { await api(`/api/alunos/${encodeURIComponent(id)}/ajuste`, {method: "PUT", body: {}}); reprocessar(id); };
+  const exc = $("#excluirAluno");
+  if (exc) exc.onclick = async () => {
+    if (!confirm("Excluir este aluno do cadastro individual?")) return;
+    await api(`/api/alunos-manuais/${g.id}`, {method: "DELETE"}); toast("Aluno excluído"); closeDrawer(); if (MIG) migracao(MIG.eid);
+  };
 }
 
 async function previaRemessa(eid, ids) {
@@ -326,35 +469,80 @@ async function escolas() {
   await loadEscolas();
   const pn = await api("/api/painel");
   const res = Object.fromEntries(pn.escolas.map(e => [e.id, e]));
-  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} escolas</h2><span class="spacer"></span>
-      <input id="fE" placeholder="Filtrar…" style="width:220px"><button class="primary" id="novaEsc">Nova escola</button></div>
-    <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Escola</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th><th></th></tr></thead>
+  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} instituições</h2><span class="spacer"></span>
+      <input id="fE" placeholder="Filtrar…" style="width:220px"><button class="primary" id="novaEsc">Nova instituição</button></div>
+    <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th><th>Acesso</th><th>Situação</th><th></th></tr></thead>
     <tbody id="tbEBody"></tbody></table></div><div id="pgE"></div></div>`;
   const rowE = e => `<tr data-n="${esc(e.nome.toLowerCase())}"><td>${e.id}</td><td>${esc(e.nome)}</td><td class="mono">${esc(e.cod_smtt)}</td><td class="mono">${esc(e.inep)}</td>
       <td>${e.geduc_nome ? esc(e.geduc_nome) : `<span class="muted">mesmo nome</span>`}</td>
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
-      <td><button data-ed="${e.id}">Editar</button></td></tr>`;
+      <td>${e.login ? `<span class="mono">${esc(e.login)}</span>` : `<span class="badge b-mute">sem acesso</span>`}</td>
+      <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : `<span class="badge b-ok">ativa</span>`}</td>
+      <td style="width:1%"><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn-sm" data-ed="${e.id}">Editar</button><button class="btn-sm" data-ac="${e.id}">Acesso</button>
+        <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
   const renderE = () => {
     const q = $("#fE").value.toLowerCase(), pg = paginar("escolas", ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q), renderE);
-    $("#tbEBody").innerHTML = pg.itens.map(rowE).join("") || `<tr><td colspan="7" class="empty">Nenhuma escola encontrada.</td></tr>`;
+    $("#tbEBody").innerHTML = pg.itens.map(rowE).join("") || `<tr><td colspan="9" class="empty">Nenhuma instituição encontrada.</td></tr>`;
     $("#pgE").innerHTML = pg.html;
   };
   $("#fE").oninput = () => { resetPag("escolas"); renderE(); };
   renderE();
   $("#novaEsc").onclick = () => editarEscola(null);
-  $("#tbE").onclick = ev => { const b = ev.target.closest("[data-ed]"); if (b) editarEscola(+b.dataset.ed); };
+  $("#tbE").onclick = ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    if (b.dataset.ed) editarEscola(+b.dataset.ed);
+    if (b.dataset.ac) acessoEscola(+b.dataset.ac);
+    if (b.dataset.bl) bloqueioEscola(+b.dataset.bl);
+  };
+}
+function acessoEscola(id) {
+  const e = ESCOLAS.find(x => x.id === id);
+  modal(`<div class="mh"><h2>Acesso da instituição</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form id="fAc"><div class="mb form">
+      <div class="full"><p class="muted" style="margin:0">${esc(e.nome)} — perfil <b>Instituição</b>: vê só os próprios alunos, sem cadastrar instituições nem gerar orçamentos.</p></div>
+      <div><label>Login</label><input name="login" required value="${esc(e.login || "")}" autocomplete="off"></div>
+      <div><label>${e.login ? "Nova senha (vazio = manter a atual)" : "Senha (mín. 6 caracteres)"}</label><input name="senha" type="password" ${e.login ? "" : "required"} minlength="6" autocomplete="new-password"></div>
+    </div>
+    <div class="mf">${e.login ? `<button type="button" class="danger" id="delAc">Remover acesso</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
+  $("#fAc").onsubmit = async ev => {
+    ev.preventDefault();
+    await api(`/api/escolas/${id}/acesso`, {method: "PUT", body: Object.fromEntries(new FormData(ev.target))});
+    closeModal(); toast("Acesso salvo"); escolas();
+  };
+  const del = $("#delAc");
+  if (del) del.onclick = async () => { if (confirm("Remover o acesso desta instituição?")) { await api(`/api/escolas/${id}/acesso`, {method: "DELETE"}); closeModal(); escolas(); } };
+}
+async function bloqueioEscola(id) {
+  const e = ESCOLAS.find(x => x.id === id);
+  if (e.bloqueado) {
+    if (!confirm(`Desbloquear o acesso de ${e.nome}?`)) return;
+    await api(`/api/escolas/${id}/bloqueio`, {method: "PUT", body: {bloqueado: false}}); toast("Acesso desbloqueado"); return escolas();
+  }
+  modal(`<div class="mh"><h2>Bloquear acesso</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form id="fBl"><div class="mb form">
+      <div class="full"><p class="muted" style="margin:0">${esc(e.nome)} não conseguirá entrar no sistema até ser desbloqueada. O motivo aparece na tela de login.</p></div>
+      <div class="full"><label>Motivo</label><select name="tipo"><option>Pendência de pagamento</option><option>Outro</option></select></div>
+      <div class="full"><label>Detalhe (opcional)</label><input name="det" placeholder="Ex.: fatura de agosto em aberto"></div>
+    </div><div class="mf"><button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Bloquear</button></div></form>`);
+  $("#fBl").onsubmit = async ev => {
+    ev.preventDefault();
+    const f = Object.fromEntries(new FormData(ev.target));
+    const motivo = f.tipo === "Outro" ? f.det : [f.tipo, f.det].filter(Boolean).join(" — ");
+    await api(`/api/escolas/${id}/bloqueio`, {method: "PUT", body: {bloqueado: true, motivo}});
+    closeModal(); toast("Acesso bloqueado"); escolas();
+  };
 }
 async function editarEscola(id) {
   const e = ESCOLAS.find(x => x.id === id) || {nome: "", cod_smtt: "", inep: "", geduc_nome: "", nivel: "ENSINO FUNDAMENTAL"};
   const sug = e.nome ? await api("/api/geduc/escolas?sugerir_para=" + encodeURIComponent(e.nome)) : await api("/api/geduc/escolas");
-  modal(`<div class="mh"><h2>${id ? "Editar escola" : "Nova escola"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+  modal(`<div class="mh"><h2>${id ? "Editar instituição" : "Nova instituição"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
     <form id="fEsc"><div class="mb form">
       <div><label>ID</label><input name="id" type="number" value="${id ?? ""}" ${id ? "disabled" : ""} placeholder="automático"></div>
       <div><label>Nível de ensino (campo CURSO da remessa)</label><input name="nivel" value="${esc(e.nivel)}"></div>
-      <div class="full"><label>Nome da escola</label><input name="nome" required value="${esc(e.nome)}"></div>
+      <div class="full"><label>Nome da instituição</label><input name="nome" required value="${esc(e.nome)}"></div>
       <div><label>Código SMTT (4 dígitos)</label><input name="cod_smtt" value="${esc(e.cod_smtt)}" maxlength="4"></div>
       <div><label>Código INEP</label><input name="inep" value="${esc(e.inep)}"></div>
-      <div class="full"><label>Vínculo com o GEDUC (nome da escola na base GEDUC)</label>
+      <div class="full"><label>Vínculo com o GEDUC (nome da instituição na base GEDUC)</label>
         <select name="geduc_nome"><option value="">Usar o mesmo nome do cadastro</option>${sug.slice(0, 400).map(s =>
           `<option value="${esc(s.escola)}" ${s.escola.trim() === (e.geduc_nome || "").trim() ? "selected" : ""}>${esc(s.escola)} — ${fmtN(s.alunos)} alunos${s.similaridade != null ? ` (${Math.round(s.similaridade * 100)}%)` : ""}</option>`).join("")}</select>
         <small class="muted">Ordenado por semelhança com o nome. Também cruza pelo INEP, se informado.</small></div>
@@ -365,23 +553,52 @@ async function editarEscola(id) {
     const f = Object.fromEntries(new FormData(ev.target));
     const body = {...e, ...f, id: id || (f.id ? +f.id : null)};
     if (id) await api(`/api/escolas/${id}`, {method: "PUT", body}); else await api("/api/escolas", {method: "POST", body});
-    closeModal(); toast("Escola salva"); escolas();
+    closeModal(); toast("Instituição salva"); escolas();
   };
   const del = $("#delEsc");
-  if (del) del.onclick = async () => { if (confirm("Excluir esta escola do cadastro?")) { await api(`/api/escolas/${id}`, {method: "DELETE"}); closeModal(); escolas(); } };
+  if (del) del.onclick = async () => { if (confirm("Excluir esta instituição? O acesso, os arquivos finais e os alunos do cadastro individual também serão excluídos.")) { await api(`/api/escolas/${id}`, {method: "DELETE"}); closeModal(); escolas(); } };
 }
 
 // ------------------------------------------------------------------ remessas
 async function remessas(_, qs) {
   const eid = qs.get("escola") || "";
   const ls = await api("/api/lotes" + (eid ? "?escola_id=" + eid : ""));
-  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>Remessas geradas</h2><span class="spacer"></span><div style="width:360px">${escolaSelect("selEscR", eid)}</div></div>
-    ${ls.length ? `<div class="table-wrap" style="max-height:none"><table id="tbL"><thead><tr><th>#</th><th>Escola</th><th>Gerada em</th><th class="num">Alunos</th><th>Arquivo</th><th></th></tr></thead><tbody id="tbLBody"></tbody></table></div><div id="pgL"></div>` : `<div class="empty">Nenhuma remessa gerada. Selecione alunos em <a href="#/migracao">Migração</a> e clique em “Gerar remessa SMTT”.</div>`}</div>`;
+  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>Remessas geradas</h2><span class="spacer"></span><div style="width:360px" data-admin>${escolaSelect("selEscR", eid)}</div></div>
+    ${ls.length ? `<div class="table-wrap" style="max-height:none"><table id="tbL"><thead><tr><th>#</th><th>Instituição</th><th>Gerada em</th><th class="num">Alunos</th><th>Arquivo</th><th></th></tr></thead><tbody id="tbLBody"></tbody></table></div><div id="pgL"></div>` : `<div class="empty">Nenhuma remessa gerada. Selecione alunos em <a href="#/migracao">Matriculado</a> e clique em “Gerar remessa SMTT”.</div>`}</div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Arquivo do processamento final</h2><span class="spacer"></span>
+      <span class="muted">TXT do processamento final + PDF com os CPFs dos alunos (os dois são obrigatórios)</span></div>
+      <div class="card-b"><form id="fFinal" class="row" style="align-items:flex-end">
+        ${ehAdmin() ? `<div style="min-width:280px;flex:1"><label>Instituição</label>${escolaSelect("selEscF", eid)}</div>` : ""}
+        <div style="flex:1;min-width:220px"><label>Arquivo TXT do processamento final</label><input type="file" name="txt" accept=".txt" required></div>
+        <div style="flex:1;min-width:220px"><label>PDF com os CPFs dos alunos</label><input type="file" name="pdf" accept=".pdf,application/pdf" required></div>
+        <button class="primary">Importar arquivos</button></form></div>
+      <div id="finais"></div></div>`;
   $("#selEscR").onchange = ev => { resetPag("remessas"); location.hash = "#/remessas?escola=" + ev.target.value; };
   const rowL = l => `<tr><td>${l.id}</td><td>${esc(l.escola)}</td><td>${esc(l.criado_em)}</td><td class="num">${fmtN(l.n_alunos)}</td>
       <td class="mono">${esc(l.arquivo)}</td><td class="row" style="gap:6px"><a class="btn" href="/api/lotes/${l.id}/arquivo">Baixar</a><a class="btn" href="#/critica?lote=${l.id}">Criticar</a><button data-ver="${l.id}">Alunos</button><button class="danger" data-del="${l.id}">Excluir</button></td></tr>`;
   const renderL = () => { const pg = paginar("remessas", ls, renderL); if ($("#tbLBody")) { $("#tbLBody").innerHTML = pg.itens.map(rowL).join(""); $("#pgL").innerHTML = pg.html; } };
   renderL();
+  const finais = async () => {
+    const fs = await api("/api/arquivos-finais" + (eid ? "?escola_id=" + eid : ""));
+    $("#finais").innerHTML = fs.length ? `<div class="table-wrap" style="max-height:none"><table><thead><tr><th>#</th><th>Instituição</th><th>Importado em</th><th>Por</th><th>TXT</th><th class="num">Registros</th><th>PDF (CPFs)</th><th></th></tr></thead><tbody>
+      ${fs.map(f => `<tr><td>${f.id}</td><td>${esc(f.escola)}</td><td>${esc(f.criado_em)}</td><td>${esc(f.enviado_por)}</td>
+        <td><a href="/api/arquivos-finais/${f.id}/txt" class="mono">${esc(f.txt_nome)}</a></td><td class="num">${fmtN(f.n_registros)}</td>
+        <td><a href="/api/arquivos-finais/${f.id}/pdf">${esc(f.pdf_nome)}</a></td><td><button class="danger" data-delf="${f.id}">Excluir</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty" style="padding:24px">Nenhum arquivo final importado.</div>`;
+  };
+  finais();
+  $("#finais").onclick = async ev => {
+    const id = ev.target.dataset.delf;
+    if (id && confirm(`Excluir o arquivo final #${id}?`)) { await api(`/api/arquivos-finais/${id}`, {method: "DELETE"}); toast("Arquivo excluído"); finais(); }
+  };
+  $("#fFinal").onsubmit = async ev => {
+    ev.preventDefault();
+    const esc_id = ehAdmin() ? $("#selEscF").value : SESSAO.escola_id;
+    if (!esc_id) return toast("Selecione a instituição");
+    const fd = new FormData(ev.target);
+    const r = await api(`/api/escolas/${esc_id}/arquivos-finais`, {method: "POST", body: fd});
+    ev.target.reset(); toast(`Arquivos importados (${fmtN(r.n_registros)} registro(s) no TXT)`); finais();
+  };
   const tb = $("#tbL");
   if (tb) tb.onclick = async ev => {
     const v = ev.target.dataset.ver, d = ev.target.dataset.del;
@@ -461,10 +678,10 @@ async function relatorios(eid, qs) {
       <span class="spacer"></span><button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="relDoc"></div>`;
   $("#selEscRel").onchange = ev => location.hash = `#/relatorios/${ev.target.value}?tipo=${tipo}`;
   $$(".tabs .tab").forEach(b => b.onclick = () => location.hash = `#/relatorios/${eid}?tipo=${b.dataset.t}`);
-  if (!eid) { $("#relDoc").innerHTML = `<div class="empty">Selecione uma escola.</div>`; return; }
+  if (!eid) { $("#relDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }
   lembrarEscola(eid);
   const d = await api(`/api/escolas/${eid}/relatorio/${tipo}`), R = RELS[tipo], e = d.escola;
-  $("#relDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/static/logo.png" alt=""><h2>${R.t} - ${new Date().getFullYear()}</h2></div>
+  $("#relDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/api/logo" alt=""><h2>${R.t} - ${new Date().getFullYear()}</h2></div>
     <div class="dmeta"><span><b>COD:</b> ${esc(e.cod_smtt)}</span><span><b>INSTITUIÇÃO:</b> ${esc(e.nome)}</span><span><b>DATA/HORA:</b> ${agora()}</span><span><b>TOTAL:</b> ${d.itens.length}</span></div>
     ${d.itens.length ? `<table><thead><tr>${R.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>
       ${d.itens.map((a, i) => `<tr>${R.row(a, i + 1).map(v => `<td>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table>`
@@ -481,21 +698,21 @@ async function orcamento(eid) {
     <span class="spacer"></span><button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="orcDoc"></div>`;
   $("#selEscO").onchange = ev => location.hash = "#/orcamento/" + ev.target.value;
   $("#preco").onchange = async ev => { await api("/api/config", {method: "PUT", body: {preco_unitario: ev.target.value}}); toast("Preço atualizado"); if (eid) render(await api(`/api/escolas/${eid}/orcamento`)); };
-  if (!eid) { $("#orcDoc").innerHTML = `<div class="empty">Selecione uma escola.</div>`; return; }
+  if (!eid) { $("#orcDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }
   lembrarEscola(eid);
   const render = o => {
-    $("#orcDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/static/logo.png" alt=""><h2>ORÇAMENTO — MIGRAÇÃO DE ESTUDANTES (SMTT)</h2></div>
-      <div class="dmeta"><span><b>ESCOLA:</b> ${esc(o.escola.nome)}</span><span><b>COD. SMTT:</b> ${esc(o.escola.cod_smtt)}</span><span><b>DATA:</b> ${agora()}</span></div>
-      <table><thead><tr><th>Matriculados</th><th>Alunos migrados</th><th>Não migrados</th><th>Índice de migração</th><th>Valor</th></tr></thead>
+    $("#orcDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/api/logo" alt=""><h2>ORÇAMENTO — MIGRAÇÃO DE ESTUDANTES (SMTT)</h2></div>
+      <div class="dmeta"><span><b>INSTITUIÇÃO:</b> ${esc(o.escola.nome)}</span><span><b>COD. SMTT:</b> ${esc(o.escola.cod_smtt)}</span><span><b>DATA:</b> ${agora()}</span></div>
+      <table><thead><tr><th>Matriculados com CPF</th><th>Alunos migrados</th><th>Não migrados</th><th>Índice de migração</th><th>Valor</th></tr></thead>
       <tbody><tr><td class="num">${fmtN(o.matriculados)}</td><td class="num">${fmtN(o.migrados)}</td><td class="num">${fmtN(o.nao_migrados)}</td><td class="num">${fmtPct(o.indice)}</td><td class="num"><b>${fmtBRL(o.total)}</b></td></tr></tbody></table>
       <br><table><thead><tr><th>Descrição</th><th class="num">Preço unitário</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>
         <tr><td>Alunos matriculados com CPF (migrados)</td><td class="num">${fmtBRL(o.preco_unitario)}</td><td class="num">${fmtN(o.migrados)}</td><td class="num">${fmtBRL(o.subtotal)}</td></tr>
         <tr><td>Peticionamento</td><td></td><td class="num">1</td><td class="num">${fmtBRL(o.peticionamento)}</td></tr>
         <tr><td>Desconto</td><td></td><td></td><td class="num">− ${fmtBRL(o.desconto)}</td></tr>
         <tr><td colspan="3"><b>Valor total</b></td><td class="num"><b>${fmtBRL(o.total)}</b></td></tr></tbody></table>
-      <div class="note">Estudante: vá até a secretaria de sua escola e verifique se seu nome foi encaminhado pela equipe de TI para o banco de dados da SMTT.</div></div>
+      <div class="note">Somente alunos com CPF cadastrado entram no orçamento.<br>Estudante: vá até a secretaria de sua escola e verifique se seu nome foi encaminhado pela equipe de TI para o banco de dados da SMTT.</div></div>
       <div class="card card-b no-print" style="max-width:960px;margin:14px auto 0"><form id="fOrc" class="row">
-        <div><label>Matriculados informados (vazio = GEDUC)</label><input name="matriculados_info" type="number" min="0" value="${o.escola.matriculados_info ?? ""}" style="width:180px"></div>
+        <div><label>Matriculados com CPF informados (vazio = calculado)</label><input name="matriculados_info" type="number" min="0" value="${o.escola.matriculados_info ?? ""}" style="width:180px"></div>
         <div><label>Peticionamento (R$)</label><input name="peticionamento" type="number" step="0.01" min="0" value="${o.peticionamento}" style="width:150px"></div>
         <div><label>Desconto (R$)</label><input name="desconto" type="number" step="0.01" min="0" value="${o.desconto}" style="width:150px"></div>
         <button class="primary" style="align-self:flex-end">Atualizar orçamento</button></form></div>`;
@@ -558,12 +775,49 @@ async function busca(_, qs) {
   $("#buscaInput").value = q;
   const rs = q ? await api("/api/alunos/busca?q=" + encodeURIComponent(q)) : [];
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${rs.length ? `${fmtN(rs.length)}${rs.length === 1000 ? "+" : ""} resultado(s) para “${esc(q)}”` : q ? `Estudante não localizado: “${esc(q)}”` : "Digite um nome ou CPF na busca acima"}</h2></div>
-    ${rs.length ? `<div class="table-wrap" style="max-height:none"><table id="tbB"><thead><tr><th>Aluno</th><th>Nasc.</th><th>Escola</th><th>Turma</th><th>Mãe</th><th>CPF (GEDUC)</th><th></th></tr></thead><tbody id="tbBBody"></tbody></table></div><div id="pgB"></div>` : ""}</div>`;
-  const rowB = r => `<tr><td><b>${esc(r.aluno)}</b></td><td>${fmtData(r.dt_nasc)}</td><td>${esc(r.escola)}</td><td>${esc(r.turma)} · ${esc(r.turno)}</td><td>${esc(r.mae)}</td><td class="mono">${fmtCPF(r.cpf_geduc)}</td>
-      <td>${r.escola_id ? `<a class="btn" href="#/migracao/${r.escola_id}">Abrir escola</a>` : `<button data-id="${esc(r.id_aluno)}">Detalhes</button>`}</td></tr>`;
+    ${rs.length ? `<div class="table-wrap" style="max-height:none"><table id="tbB"><thead><tr><th>Aluno</th><th>Nasc.</th><th>Instituição</th><th>Turma</th><th>Mãe</th><th>CPF (GEDUC)</th><th></th></tr></thead><tbody id="tbBBody"></tbody></table></div><div id="pgB"></div>` : ""}</div>`;
+  const rowB = r => `<tr><td><b>${esc(r.aluno)}</b>${r.manual ? ` <span class="badge b-info">individual</span>` : ""}</td><td>${fmtData(r.dt_nasc)}</td><td>${esc(r.escola)}</td><td>${esc(r.turma)} · ${esc(r.turno)}</td><td>${esc(r.mae)}</td><td class="mono">${fmtCPF(r.cpf_geduc)}</td>
+      <td>${r.escola_id ? `<a class="btn" href="#/migracao/${r.escola_id}">Abrir instituição</a>` : `<button data-id="${esc(r.id_aluno)}">Detalhes</button>`}</td></tr>`;
   const renderB = () => { const pg = paginar("busca", rs, renderB); if ($("#tbBBody")) { $("#tbBBody").innerHTML = pg.itens.map(rowB).join(""); $("#pgB").innerHTML = pg.html; } };
   resetPag("busca"); renderB();
   const tb = $("#tbB"); if (tb) tb.onclick = ev => { const id = ev.target.dataset.id; if (id) { MIG = null; abrirAluno(id); } };
 }
 
-router();
+// ------------------------------------------------------------------ configuracoes (admin)
+async function config() {
+  const cfg = await api("/api/config");
+  $("#view").innerHTML = `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));align-items:start">
+    <div class="card"><div class="card-h"><h2>Identidade visual</h2></div><div class="card-b">
+      <div style="background:var(--soft);border:1px solid var(--line);border-radius:var(--radius-sm);padding:18px;text-align:center;margin-bottom:14px">
+        <img class="logo-img" src="/api/logo?t=${Date.now()}" alt="Logo atual" style="max-width:240px;max-height:90px"></div>
+      <form id="fLogo" class="row"><input type="file" name="arquivo" accept="image/png,image/jpeg,image/svg+xml,image/webp" required style="flex:1 1 100%">
+        <button class="primary">Enviar nova logo</button><button type="button" id="logoPadrao">Restaurar padrão</button></form>
+      <p class="muted" style="margin-bottom:0">PNG, JPG, SVG ou WEBP, até 2 MB. Usada no menu, na tela de login, nos relatórios e no orçamento.</p></div></div>
+    <div class="card"><div class="card-h"><h2>Suporte</h2></div><form id="fSup" class="card-b form">
+      <div class="full"><label>WhatsApp do suporte (com DDD)</label><input name="whatsapp" value="${esc(cfg.whatsapp || "")}" placeholder="(98) 99999-9999"></div>
+      <div class="full"><label>Texto da opção Suporte</label><textarea name="suporte_texto" rows="4" placeholder="Horário de atendimento, e-mail, telefone…">${esc(cfg.suporte_texto || "")}</textarea></div>
+      <div class="full"><button class="primary">Salvar suporte</button></div></form></div>
+    <div class="card"><div class="card-h"><h2>Orçamento</h2></div><form id="fPreco" class="card-b row" style="align-items:flex-end">
+      <div><label>Preço unitário por aluno com CPF (R$)</label><input name="preco_unitario" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:180px"></div>
+      <button class="primary">Salvar</button></form></div></div>`;
+  $("#fLogo").onsubmit = async ev => {
+    ev.preventDefault();
+    await api("/api/logo", {method: "PUT", body: new FormData(ev.target)}); toast("Logo atualizada"); refreshLogo(); ev.target.reset();
+  };
+  $("#logoPadrao").onclick = async () => { await api("/api/logo", {method: "DELETE"}); toast("Logo padrão restaurada"); refreshLogo(); };
+  $("#fSup").onsubmit = async ev => {
+    ev.preventDefault();
+    await api("/api/config", {method: "PUT", body: Object.fromEntries(new FormData(ev.target))});
+    PUBLICO = await api("/api/publico"); aplicarPublico(); toast("Suporte salvo");
+  };
+  $("#fPreco").onsubmit = async ev => { ev.preventDefault(); await api("/api/config", {method: "PUT", body: Object.fromEntries(new FormData(ev.target))}); toast("Preço salvo"); };
+}
+
+async function boot() {
+  try { PUBLICO = await api("/api/publico"); } catch {}
+  aplicarPublico();
+  if (PUBLICO.precisa_setup) return mostrarLogin();
+  try { SESSAO = await api("/api/sessao"); } catch { return; }  // sem sessao: api() ja abriu o login
+  entrar();
+}
+boot();

@@ -5,31 +5,20 @@ import codecs
 
 from . import db
 from .critica import LAYOUT, LEGENDA, TAM_LINHA, criticar_campos
-from .util import cpf_valido, mascara_cpf, norm_cpf, norm_nome, sem_acento, so_digitos
+from .util import cpf_valido, mascara_cpf, nome_completo, norm_cpf, norm_nome, sem_acento, so_digitos
 
 DIVERGENTE = "DIVERGENTE"
 
 
-def consolidar(ak: str, al: str, am: str, an: str = "") -> str:
-    """Formula da coluna AO (aba ESCOLA). AK=GEDUC, AL=CENSO, AM=SMTT, AN=CPF informado depois.
-    Vale a maioria; se so uma fonte tem CPF, usa ela; se as fontes discordam, DIVERGENTE."""
-    if ak == al == am == "":
-        return an
-    if ak == al == "":
-        return am
-    if al == am == "":
-        return ak
-    if ak == am == "":
-        return al
-    if ak == al == am:
-        return ak
-    if ak == al and al != am:
-        return ak
-    if ak == am and al != am:
-        return ak
-    if ak != al and al == am:
-        return al
-    return DIVERGENTE
+def consolidar(*fontes: str) -> str:
+    """Formula da coluna AO (aba ESCOLA), estendida a qualquer numero de fontes (GEDUC, CENSO, SMTT, status).
+    Vale a maioria; se so uma fonte tem CPF, usa ela; se as fontes empatam ou discordam, DIVERGENTE."""
+    votos = Counter(f for f in fontes if f).most_common()
+    if not votos:
+        return ""
+    if len(votos) > 1 and votos[0][1] == votos[1][1]:
+        return DIVERGENTE
+    return votos[0][0]
 
 
 class Bases:
@@ -73,32 +62,68 @@ def filtro_escola(escola) -> tuple[str, list]:
     return "escola_norm = ?", [nome]
 
 
+# campos do aluno que a instituicao pode corrigir (tabela ajustes) antes de reprocessar
+CAMPOS_AJUSTE = ("aluno", "pai", "genero", "dt_nasc", "ano_serie", "turno", "turma", "matricula", "rua", "numero",
+                 "bairro", "cidade", "cep")
+
+
+def manual_como_geduc(m: dict) -> dict:
+    """Aluno cadastrado individualmente, no mesmo formato de uma linha do GEDUC."""
+    return {**m, "id_aluno": f"M{m['id']}", "modalidade": "", "manual": True}
+
+
+def aluno_base(con, id_aluno: str) -> dict | None:
+    """Linha do GEDUC ou do cadastro individual (id_aluno 'M<id>')."""
+    if id_aluno.startswith("M") and id_aluno[1:].isdigit():
+        r = con.execute("SELECT * FROM alunos_manuais WHERE id=?", (int(id_aluno[1:]),)).fetchone()
+        return manual_como_geduc(dict(r)) if r else None
+    r = con.execute("SELECT * FROM geduc WHERE id_aluno=?", (id_aluno,)).fetchone()
+    return dict(r) if r else None
+
+
+def aluno_na_escola(con, escola, id_aluno: str) -> bool:
+    if id_aluno.startswith("M") and id_aluno[1:].isdigit():
+        return bool(con.execute("SELECT 1 FROM alunos_manuais WHERE id=? AND escola_id=?",
+                                (int(id_aluno[1:]), escola["id"])).fetchone())
+    where, args = filtro_escola(escola)
+    return bool(con.execute(f"SELECT 1 FROM geduc WHERE id_aluno=? AND {where}", [id_aluno, *args]).fetchone())
+
+
 def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
     bases = bases or Bases(con)
     where, args = filtro_escola(escola)
     rows = [dict(r) for r in con.execute(f"SELECT * FROM geduc WHERE {where} ORDER BY aluno", args)]
+    rows += [manual_como_geduc(dict(r)) for r in con.execute(
+        "SELECT * FROM alunos_manuais WHERE escola_id=? ORDER BY aluno", (escola["id"],))]
     out = []
     for g in rows:
-        nn, nasc = g["nome_norm"], g["dt_nasc"]
+        aj = bases.ajustes.get(g["id_aluno"], {})
+        corrigidos = [k for k in CAMPOS_AJUSTE if aj.get(k)]
+        g.update({k: aj[k] for k in corrigidos})
+        nn = norm_nome(g["aluno"]) if "aluno" in corrigidos else g["nome_norm"]
+        nasc = g["dt_nasc"]
         c = _pick(bases.censo.get(nn, []), nasc, "dt_nasc")
         s = _pick(bases.smtt.get(nn, []), nasc, "nascido")
         st = bases.status_id.get(g["id_aluno"]) or _pick(bases.status_nome.get(nn, []), nasc, "nascimento")
-        aj = bases.ajustes.get(g["id_aluno"], {})
         cpf_g, cpf_c, cpf_s = g["cpf"] or "", (c or {}).get("cpf") or "", (s or {}).get("cpf") or ""
+        cpf_st = norm_cpf((st or {}).get("cpf"))
         cpf_m = norm_cpf(aj.get("cpf"))
-        cpf = cpf_m or consolidar(cpf_g, cpf_c, cpf_s)
+        cpf = cpf_m or consolidar(cpf_g, cpf_c, cpf_s, cpf_st)
         mae = (aj.get("mae") or g["mae"] or (st or {}).get("mae") or "").strip()
         out.append({
             "id_aluno": g["id_aluno"], "aluno": g["aluno"].strip(), "nome_norm": nn, "dt_nasc": nasc,
             "genero": g["genero"], "ano_serie": g["ano_serie"], "turno": g["turno"], "turma": g["turma"],
             "modalidade": g["modalidade"], "mae": mae, "pai": (g["pai"] or "").strip(),
             "rua": g["rua"], "numero": g["numero"], "bairro": g["bairro"], "cidade": g["cidade"], "cep": g["cep"],
-            "cpf_geduc": cpf_g, "cpf_censo": cpf_c, "cpf_smtt": cpf_s, "cpf_manual": cpf_m, "cpf": cpf,
-            "situacao": (st or {}).get("situacao") or "", "matricula": (st or {}).get("matricula") or "",
-            "telefone": aj.get("telefone") or (st or {}).get("telefone") or (s or {}).get("celular")
-                        or (s or {}).get("telefone") or "",
-            "rg": aj.get("rg") or (s or {}).get("rg") or "", "org_exp": aj.get("org_exp") or (s or {}).get("org_exp") or "",
-            "data_exp": aj.get("data_exp") or (s or {}).get("data_exp") or "",
+            "cpf_geduc": cpf_g, "cpf_censo": cpf_c, "cpf_smtt": cpf_s, "cpf_status": cpf_st, "cpf_manual": cpf_m,
+            "cpf": cpf, "manual": bool(g.get("manual")), "corrigidos": corrigidos,
+            "situacao": (st or {}).get("situacao") or "",
+            "matricula": g.get("matricula") or (st or {}).get("matricula") or "",
+            "telefone": aj.get("telefone") or g.get("telefone") or (st or {}).get("telefone")
+                        or (s or {}).get("celular") or (s or {}).get("telefone") or "",
+            "rg": aj.get("rg") or g.get("rg") or (s or {}).get("rg") or "",
+            "org_exp": aj.get("org_exp") or g.get("org_exp") or (s or {}).get("org_exp") or "",
+            "data_exp": aj.get("data_exp") or g.get("data_exp") or (s or {}).get("data_exp") or "",
             "cartao_smtt": (s or {}).get("cartao") or "", "no_smtt": bool(s), "no_censo": bool(c),
             "obs": aj.get("obs") or "",
             "migrado": bool(bases.migrados.get(g["id_aluno"])),
@@ -122,14 +147,16 @@ def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
             p.append("nome_duplicado")
         if not a["mae"]:
             p.append("sem_mae")
-        # criticas do validador oficial (CPF ja coberto pelas pendencias acima)
+        elif not nome_completo(a["mae"]):
+            p.append("mae_incompleta")
+        # criticas do validador oficial (CPF e mae ja cobertos pelas pendencias acima)
         # 0 = codigo da escola (alerta no nivel da escola, nao do aluno)
-        a["criticas"] = [x for x in criticar_campos(campos_remessa(escola, a)) if x not in (0, 2, 14, 16)]
+        a["criticas"] = [x for x in criticar_campos(campos_remessa(escola, a)) if x not in (0, 2, 14, 16, 18)]
         if a["criticas"]:
             p.append("critica_smtt")
         a["pendencias"] = p
-        a["apto"] = (a["cpf"] not in ("", DIVERGENTE) and a["mae"] != "" and not a["criticas"]
-                     and not {"cpf_invalido", "cpf_duplicado"} & set(p))
+        a["apto"] = (a["cpf"] not in ("", DIVERGENTE) and not a["criticas"]
+                     and not {"cpf_invalido", "cpf_duplicado", "sem_mae", "mae_incompleta"} & set(p))
     return out
 
 
@@ -141,6 +168,7 @@ def resumo(alunos: list[dict]) -> dict:
     return {"matriculados": n, "com_cpf": com_cpf, "sem_cpf": cont["sem_cpf"], "divergentes": cont["divergente"],
             "cpf_invalido": cont["cpf_invalido"], "cpf_duplicado": cont["cpf_duplicado"],
             "nome_duplicado": cont["nome_duplicado"], "sem_mae": cont["sem_mae"],
+            "mae_incompleta": cont["mae_incompleta"],
             "aptos": sum(a["apto"] for a in alunos), "migrados": migr,
             "indice_cpf": round(com_cpf / n, 4) if n else 0,
             "indice_divergencia": round(cont["divergente"] / n, 4) if n else 0}
@@ -165,11 +193,22 @@ def _ddmmaaaa(iso: str) -> str:
     return f"{m[3]}{m[2]}{m[1]}" if m else ""
 
 
+DDD_PADRAO = "98"  # Sao Luis
+
+
 def _fone(v: str) -> str:
-    d = so_digitos(v.split("/")[0] if v else "")
-    if len(d) == 11:  # celular com 9 digitos: layout tem 10 posicoes (DDD + 8)
-        return d[:2] + d[3:]
-    return d if len(d) == 10 else ""
+    """Primeiro telefone valido do campo, no formato do layout (10 posicoes: DDD + 8)."""
+    for parte in re.split(r"[/,;|]| E | OU ", (v or "").upper()):
+        d = so_digitos(parte)
+        if len(d) > 11 and d.startswith("55"):  # +55
+            d = d[2:]
+        if len(d) in (8, 9):  # sem DDD
+            d = DDD_PADRAO + d
+        if len(d) == 11:  # celular com 9 digitos: layout tem 10 posicoes (DDD + 8)
+            d = d[:2] + d[3:]
+        if len(d) == 10:
+            return d
+    return ""
 
 
 def _serie(a: dict) -> str:
@@ -261,11 +300,12 @@ def salvar_lote(con, escola, remessa: dict) -> int:
 # ---------------------------------------------------------------- orcamento (aba ORCAMENTO)
 
 def orcamento(con, escola, res: dict | None = None) -> dict:
+    """So entram no orcamento alunos com CPF: a base e o total de matriculados com CPF consolidado."""
     res = res or resumo(alunos_da_escola(con, escola))
     preco = float(db.get_config(con, "preco_unitario", "0.43"))
-    matric = escola["matriculados_info"] or res["matriculados"]
+    matric = escola["matriculados_info"] or res["com_cpf"]
     migr = con.execute("""SELECT COUNT(DISTINCT la.id_aluno) FROM lote_alunos la JOIN lotes l ON l.id = la.lote_id
-                          WHERE l.escola_id = ?""", (escola["id"],)).fetchone()[0]
+                          WHERE l.escola_id = ? AND COALESCE(la.cpf, '') <> ''""", (escola["id"],)).fetchone()[0]
     pet, desc = escola["peticionamento"] or 0, escola["desconto"] or 0
     return {"matriculados": matric, "migrados": migr, "nao_migrados": max(matric - migr, 0),
             "indice": round(migr / matric, 4) if matric else 0, "preco_unitario": preco,
@@ -277,7 +317,7 @@ def relatorio(alunos: list[dict], tipo: str) -> list[dict]:
     if tipo == "sem_cpf":
         sel = [a for a in alunos if "sem_cpf" in a["pendencias"] or "divergente" in a["pendencias"]]
     elif tipo == "sem_mae":
-        sel = [a for a in alunos if "sem_mae" in a["pendencias"]]
+        sel = [a for a in alunos if {"sem_mae", "mae_incompleta"} & set(a["pendencias"])]
     else:
         sel = alunos
     return [{"aluno": a["aluno"], "dt_nasc": a["dt_nasc"], "sexo": (a["genero"] or "")[:1], "mae": a["mae"],

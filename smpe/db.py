@@ -86,12 +86,61 @@ CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT);
 INSERT OR IGNORE INTO config VALUES ('preco_unitario', '0.43');
 INSERT OR IGNORE INTO config VALUES ('remessa_bom', '1');
 
+INSERT OR IGNORE INTO config VALUES ('whatsapp', '');
+INSERT OR IGNORE INTO config VALUES ('suporte_texto', '');
+
+-- Acesso: perfil admin (tudo) ou instituicao (um login por instituicao, so os proprios alunos)
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE,
+    senha_hash TEXT NOT NULL,
+    perfil TEXT NOT NULL DEFAULT 'instituicao',
+    escola_id INTEGER REFERENCES escolas(id) ON DELETE CASCADE,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS sessoes (
+    token TEXT PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    expira REAL NOT NULL
+);
+
+-- Alunos cadastrados individualmente pela instituicao (fora do GEDUC); id_aluno = 'M' + id
+CREATE TABLE IF NOT EXISTS alunos_manuais (
+    id INTEGER PRIMARY KEY,
+    escola_id INTEGER NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+    aluno TEXT NOT NULL, mae TEXT, pai TEXT, genero TEXT, dt_nasc TEXT, ano_serie TEXT, turno TEXT, turma TEXT,
+    matricula TEXT, rua TEXT, numero TEXT, bairro TEXT, cidade TEXT, cep TEXT, cpf TEXT, telefone TEXT,
+    rg TEXT, org_exp TEXT, data_exp TEXT, nome_norm TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- Arquivo TXT do processamento final + PDF com os CPFs (apenas arquivados)
+CREATE TABLE IF NOT EXISTS arquivos_finais (
+    id INTEGER PRIMARY KEY,
+    escola_id INTEGER NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    enviado_por TEXT,
+    txt_nome TEXT NOT NULL, txt BLOB NOT NULL, n_registros INTEGER,
+    pdf_nome TEXT NOT NULL, pdf BLOB NOT NULL
+);
+
+-- Arquivos de configuracao (logo)
+CREATE TABLE IF NOT EXISTS arquivos_config (
+    chave TEXT PRIMARY KEY, tipo TEXT, conteudo BLOB NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS importacoes (
     id INTEGER PRIMARY KEY, base TEXT, arquivo TEXT, linhas INTEGER,
     importado_em TEXT DEFAULT (datetime('now','localtime'))
 );
 """
 
+
+# colunas incluidas depois da primeira versao do banco
+COLUNAS_NOVAS = [("lotes", "num_remessa", "INTEGER"), ("escolas", "bloqueado", "INTEGER DEFAULT 0"),
+                 ("escolas", "motivo_bloqueio", "TEXT DEFAULT ''"), ("geduc", "telefone", "TEXT")] + [
+    ("ajustes", c, "TEXT") for c in ("aluno", "pai", "genero", "dt_nasc", "ano_serie", "turno", "turma", "matricula",
+                                     "rua", "numero", "bairro", "cidade", "cep")]
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 # horario local de Sao Luis (UTC-3); o servidor do Render roda em UTC
@@ -174,6 +223,8 @@ def _connect_pg() -> PgConnection:
         with _schema_lock:
             if not _schema_ok:
                 con.execute(_schema_pg())
+                for t, c, tipo in COLUNAS_NOVAS:
+                    con.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {c} {tipo}")
                 _schema_ok = True
     return con
 
@@ -187,8 +238,9 @@ def connect():
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
-    if "num_remessa" not in {r[1] for r in con.execute("PRAGMA table_info(lotes)")}:
-        con.execute("ALTER TABLE lotes ADD COLUMN num_remessa INTEGER")
+    for t, c, tipo in COLUNAS_NOVAS:
+        if c not in {r[1] for r in con.execute(f"PRAGMA table_info({t})")}:
+            con.execute(f"ALTER TABLE {t} ADD COLUMN {c} {tipo}")
     return con
 
 

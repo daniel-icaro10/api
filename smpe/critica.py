@@ -5,7 +5,7 @@ import codecs
 import re
 from datetime import date
 
-from .util import cpf_valido
+from .util import cpf_valido, nome_completo
 
 LEGENDA = {
     0: "ESCOLA DEVE SER INFORMADA E DEVER SER UM NUMERO INTEIRO",
@@ -26,6 +26,7 @@ LEGENDA = {
     15: "CPF DUPLICADO",
     16: "CPF INVALIDO",
     17: "QUANTIDADE DE COLUNAS DIFERENTE DO LAYOUT",
+    18: "NOME DA MAE DEVE TER NOME E SOBRENOME",  # regra do SIS SMPE (nao existe no validador oficial)
 }
 OBS = ["A - CPF OBRIGATORIO COM 11 POSICOES", "B - O FORMATO DO ARQUIVO NAO ACEITA LINHAS EM BRANCO",
        "C - AS LINHAS DEVEM CONTER 375 COLUNAS"]
@@ -60,6 +61,8 @@ def criticar_campos(c: dict) -> list[int]:
         e.append(1)
     if not v["MAE"]:
         e.append(2)
+    elif not nome_completo(v["MAE"]):
+        e.append(18)
     if v["SEXO"] not in ("M", "F"):
         e.append(3)
     if not v["CURSO"]:

@@ -5,9 +5,10 @@ from pathlib import Path
 from . import db
 
 # ordem respeitando as chaves estrangeiras
-TABELAS = ["escolas", "geduc", "censo", "smtt", "status_alunos", "ajustes", "lotes", "lote_alunos", "config",
-           "importacoes"]
-COM_SEQUENCIA = ["escolas", "geduc", "censo", "smtt", "status_alunos", "lotes", "importacoes"]
+TABELAS = ["escolas", "usuarios", "geduc", "censo", "smtt", "status_alunos", "ajustes", "alunos_manuais", "lotes",
+           "lote_alunos", "arquivos_finais", "arquivos_config", "config", "importacoes"]
+COM_SEQUENCIA = ["escolas", "usuarios", "geduc", "censo", "smtt", "status_alunos", "alunos_manuais", "lotes",
+                 "arquivos_finais", "importacoes"]
 
 
 def _num(v, tipo: str):
@@ -37,6 +38,9 @@ def migrar(arquivo: str, substituir: bool = False, log=print) -> dict:
         for t in TABELAS:
             cols_src = {r[1] for r in src.execute(f"PRAGMA table_info({t})")}
             cols = [c for (tab, c) in tipos if tab == t and c in cols_src]
+            if not cols:  # tabela que nao existia no SQLite de origem
+                out[t] = 0
+                continue
             numericas = {c for c in cols if tipos[(t, c)] in ("integer", "double precision")}
             rows = [[_num(r[c], tipos[(t, c)]) if c in numericas else r[c] for c in cols]
                     for r in src.execute(f"SELECT {', '.join(cols)} FROM {t}")]

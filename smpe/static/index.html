@@ -20,30 +20,60 @@
   <symbol id="i-bases" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
   <symbol id="i-busca" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
   <symbol id="i-critica" viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></symbol>
+  <symbol id="i-config" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-suporte" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-whatsapp" viewBox="0 0 24 24"><path d="M3 21l1.7-4.9A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-2-1-1 1a4 4 0 0 1-2-2l1-1-1-2z"/></symbol>
+  <symbol id="i-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
 </svg>
+<div id="login" class="login" hidden>
+  <form class="login-card" id="loginForm">
+    <img class="logo-img" src="/api/logo" alt="SIS SMPE - Migração de estudantes SMTT">
+    <h1 id="loginTitulo">Entrar</h1>
+    <p class="muted" id="loginSub">Acesse com o login da sua instituição.</p>
+    <div class="alert warn" id="loginMsg" hidden></div>
+    <div><label>Login</label><input name="login" autocomplete="username" required></div>
+    <div><label>Senha</label><input name="senha" type="password" autocomplete="current-password" required></div>
+    <div id="loginConf" hidden><label>Confirme a senha</label><input name="senha2" type="password" autocomplete="new-password"></div>
+    <button class="primary" id="loginBtn">Entrar</button>
+    <div class="login-sup" id="loginSup"></div>
+  </form>
+</div>
 <aside class="side">
-  <div class="brand"><img src="/static/logo.png" alt="SIS SMPE - Migração de estudantes SMTT"></div>
+  <div class="brand"><img class="logo-img" src="/api/logo" alt="SIS SMPE - Migração de estudantes SMTT"></div>
   <nav id="nav">
     <div class="nav-label">Visão geral</div>
     <a href="#/painel" data-r="painel"><svg class="i"><use href="#i-painel"/></svg>Painel</a>
     <div class="nav-label">Operação</div>
-    <a href="#/migracao" data-r="migracao"><svg class="i"><use href="#i-migracao"/></svg>Migração</a>
+    <a href="#/migracao" data-r="migracao"><svg class="i"><use href="#i-migracao"/></svg>Matriculado</a>
     <a href="#/remessas" data-r="remessas"><svg class="i"><use href="#i-remessas"/></svg>Remessas SMTT</a>
     <a href="#/critica" data-r="critica"><svg class="i"><use href="#i-critica"/></svg>Criticar remessa</a>
     <a href="#/relatorios" data-r="relatorios"><svg class="i"><use href="#i-relatorios"/></svg>Relatórios</a>
-    <a href="#/orcamento" data-r="orcamento"><svg class="i"><use href="#i-orcamento"/></svg>Orçamento</a>
-    <div class="nav-label">Cadastros</div>
-    <a href="#/escolas" data-r="escolas"><svg class="i"><use href="#i-escolas"/></svg>Escolas</a>
-    <a href="#/bases" data-r="bases"><svg class="i"><use href="#i-bases"/></svg>Bases e importação</a>
+    <a href="#/orcamento" data-r="orcamento" data-admin><svg class="i"><use href="#i-orcamento"/></svg>Orçamento</a>
+    <div class="nav-label" data-admin>Cadastros</div>
+    <a href="#/escolas" data-r="escolas" data-admin><svg class="i"><use href="#i-escolas"/></svg>Instituições</a>
+    <a href="#/bases" data-r="bases" data-admin><svg class="i"><use href="#i-bases"/></svg>Bases e importação</a>
+    <a href="#/config" data-r="config" data-admin><svg class="i"><use href="#i-config"/></svg>Configurações</a>
   </nav>
-  <div class="side-foot"><span class="dot"></span>Dados locais · uso restrito (LGPD)</div>
+  <div class="side-sup">
+    <a href="#" id="supBtn"><svg class="i"><use href="#i-suporte"/></svg>Suporte</a>
+    <a href="#" id="waBtn" class="wa" target="_blank" rel="noopener" hidden><svg class="i"><use href="#i-whatsapp"/></svg>Suporte via WhatsApp</a>
+  </div>
+  <div class="side-foot"><span class="dot"></span>Uso restrito (LGPD)</div>
 </aside>
 <div class="main">
   <header class="top">
     <button class="icon-btn only-mobile" id="menuBtn" aria-label="Menu">☰</button>
     <div><h1 id="title">Painel</h1><div class="crumb" id="crumb">SIS SMPE</div></div>
     <form class="search" id="buscaForm"><svg class="i"><use href="#i-busca"/></svg><input id="buscaInput" placeholder="Localizar estudante por nome ou CPF…" autocomplete="off"></form>
+    <div class="user" id="userBox">
+      <button class="user-btn" id="userBtn" aria-haspopup="true"><span class="user-av" id="userAv"></span>
+        <span class="user-txt"><b id="userNome"></b><small id="userPerfil"></small></span></button>
+      <div class="user-menu" id="userMenu" hidden>
+        <button id="senhaBtn">Alterar senha</button>
+        <button id="sairBtn" class="danger"><svg class="i"><use href="#i-sair"/></svg>Sair</button>
+      </div>
+    </div>
   </header>
   <section id="view" class="view"></section>
 </div>
