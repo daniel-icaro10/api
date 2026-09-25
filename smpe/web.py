@@ -22,6 +22,15 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _import = {"rodando": False, "msg": [], "erro": None}
 
 
+@app.middleware("http")
+async def sem_cache_das_telas(request: Request, call_next):
+    """O navegador sempre confere se a pagina e os arquivos mudaram (evita tela antiga apos atualizar o sistema)."""
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
