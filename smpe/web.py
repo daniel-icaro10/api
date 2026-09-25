@@ -629,17 +629,23 @@ def detalhe_aluno(id_aluno: str, u: dict = Depends(usuario)):
     if not g:
         raise HTTPException(404)
     _checa_aluno(con, u, id_aluno)
-    nn = g["nome_norm"]
-    return {"geduc": g,
-            "censo": [dict(r) for r in con.execute("SELECT * FROM censo WHERE nome_norm=?", (nn,))],
-            "smtt": [dict(r) for r in con.execute("SELECT * FROM smtt WHERE nome_norm=?", (nn,))],
-            "status": [dict(r) for r in con.execute(
-                "SELECT * FROM status_alunos WHERE id_aluno=? OR nome_norm=?", (id_aluno, nn))],
-            "ajuste": dict(r) if (r := con.execute("SELECT * FROM ajustes WHERE id_aluno=?", (id_aluno,)).fetchone())
-            else None,
-            "lotes": [dict(r) for r in con.execute(
-                """SELECT l.id, l.criado_em, l.arquivo, e.nome escola FROM lote_alunos la JOIN lotes l ON l.id=la.lote_id
-                   JOIN escolas e ON e.id=l.escola_id WHERE la.id_aluno=?""", (id_aluno,))]}
+    aj = con.execute("SELECT * FROM ajustes WHERE id_aluno=?", (id_aluno,)).fetchone()
+    nn = norm_nome(aj["aluno"]) if aj and aj["aluno"] else g["nome_norm"]
+    censo = [dict(r) for r in con.execute("SELECT * FROM censo WHERE nome_norm=?", (nn,))]
+    smtt = [dict(r) for r in con.execute("SELECT * FROM smtt WHERE nome_norm=?", (nn,))]
+    status = [dict(r) for r in con.execute("SELECT * FROM status_alunos WHERE id_aluno=? OR nome_norm=?", (id_aluno, nn))]
+    lotes = [dict(r) for r in con.execute(
+        """SELECT l.id, l.escola_id, l.criado_em, l.arquivo, e.nome escola FROM lote_alunos la
+           JOIN lotes l ON l.id=la.lote_id JOIN escolas e ON e.id=l.escola_id WHERE la.id_aluno=?""", (id_aluno,))]
+    if not _eh_admin(u):
+        # a instituicao ve so o registro usado no cruzamento (homonimos de outras instituicoes ficam de fora)
+        nasc = (aj["dt_nasc"] if aj and aj["dt_nasc"] else "") or g["dt_nasc"]
+        um = lambda rows, campo: [x] if (x := logic._pick(rows, nasc, campo)) else []
+        censo, smtt = um(censo, "dt_nasc"), um(smtt, "nascido")
+        status = [x for x in status if x["id_aluno"] == id_aluno] or um(status, "nascimento")
+        lotes = [x for x in lotes if x["escola_id"] == u["escola_id"]]
+    return {"geduc": g, "censo": censo, "smtt": smtt, "status": status, "ajuste": dict(aj) if aj else None,
+            "lotes": lotes}
 
 
 # ------------------------------------------------------------------ remessas

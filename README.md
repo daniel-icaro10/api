@@ -45,7 +45,8 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 - Vale o CPF que aparece em mais fontes. Se só uma fonte tem CPF, vale essa fonte.
 - Se as fontes com CPF discordam entre si e nenhuma tem maioria (empate), o aluno fica como **DIVERGENTE**. Com três fontes, é a mesma fórmula da coluna AO.
 - A correção informada no sistema tem prioridade sobre as bases. Ela substitui o preenchimento em papel dos relatórios.
-- O cruzamento é feito pelo **nome do aluno**, como os PROCV da planilha. Quando há nomes iguais, o sistema escolhe o registro com a mesma data de nascimento.
+- O cruzamento é feito pelo **nome do aluno**, como os PROCV da planilha, conferindo a data de nascimento: um registro com o mesmo nome e data diferente é de outro aluno (homônimo) e não entra no cruzamento. Sem data em uma das bases, vale só o nome.
+- A instituição vê na ficha do aluno só o registro de cada base que entrou no cruzamento.
 
 ## Melhorias em relação à planilha
 

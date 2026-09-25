@@ -45,14 +45,13 @@ class Bases:
 
 
 def _pick(cands: list[dict], nasc: str, campo_nasc: str) -> dict | None:
-    """Varios registros com o mesmo nome: prefere o de mesma data de nascimento."""
-    if not cands:
-        return None
-    if len(cands) > 1 and nasc:
-        for c in cands:
-            if (c.get(campo_nasc) or "")[:10] == nasc:
-                return c
-    return cands[0]
+    """Registro de outra base com o mesmo nome: prefere o de mesma data de nascimento e descarta os de data
+    diferente (homonimo, possivelmente de outra instituicao). Sem data de um dos lados, vale o nome."""
+    if not nasc:
+        return cands[0] if cands else None
+    iguais = [c for c in cands if (c.get(campo_nasc) or "")[:10] == nasc]
+    sem_data = [c for c in cands if not c.get(campo_nasc)]
+    return (iguais or sem_data or [None])[0]
 
 
 def filtro_escola(escola) -> tuple[str, list]:
