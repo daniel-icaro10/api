@@ -1,11 +1,12 @@
 """Regras de negocio da planilha SIS SMPE: cruzamento de CPF, pendencias, remessa SMTT e orcamento."""
 import re
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 import codecs
 
 from . import db
 from .critica import LAYOUT, LEGENDA, TAM_LINHA, criticar_campos
-from .util import cpf_valido, mascara_cpf, nome_completo, norm_cpf, norm_nome, sem_acento, so_digitos
+from .util import chave_nome, cpf_valido, mascara_cpf, nome_completo, norm_cpf, norm_nome, sem_acento, so_digitos
 
 DIVERGENTE = "DIVERGENTE"
 
@@ -25,23 +26,34 @@ class Bases:
     """Indices em memoria das bases auxiliares (CENSO, SMTT, status, ajustes, remessas)."""
 
     def __init__(self, con):
-        self.censo = defaultdict(list)
-        for r in con.execute("SELECT * FROM censo"):
-            self.censo[r["nome_norm"]].append(dict(r))
-        self.smtt = defaultdict(list)
-        for r in con.execute("SELECT * FROM smtt"):
-            self.smtt[r["nome_norm"]].append(dict(r))
-        self.status_id, self.status_nome = {}, defaultdict(list)
-        for r in con.execute("SELECT * FROM status_alunos"):
-            d = dict(r)
-            if d["id_aluno"]:
-                self.status_id[d["id_aluno"]] = d
-            self.status_nome[d["nome_norm"]].append(d)
+        # por nome e por nome sem particulas; o ID_ALUNO do Alunos por status NAO e o do GEDUC (outra numeracao)
+        self.censo, self.censo_ch = _indices(con, "censo")
+        self.smtt, self.smtt_ch = _indices(con, "smtt")
+        self.status_nome, self.status_ch = _indices(con, "status_alunos")
         self.ajustes = {r["id_aluno"]: dict(r) for r in con.execute("SELECT * FROM ajustes")}
         self.migrados = defaultdict(list)
         for r in con.execute("""SELECT la.id_aluno, l.id, l.criado_em, l.escola_id FROM lote_alunos la
                                 JOIN lotes l ON l.id = la.lote_id ORDER BY l.id"""):
             self.migrados[r["id_aluno"]].append({"lote": r["id"], "em": r["criado_em"], "escola_id": r["escola_id"]})
+
+
+def _indices(con, tabela: str) -> tuple[dict, dict]:
+    por_nome, por_chave = defaultdict(list), defaultdict(list)
+    for r in con.execute(f"SELECT * FROM {tabela}"):
+        d = dict(r)
+        por_nome[d["nome_norm"]].append(d)
+        por_chave[chave_nome(d["nome_norm"])].append(d)
+    return por_nome, por_chave
+
+
+def achar(por_nome: dict, por_chave: dict, nn: str, nasc: str, campo_nasc: str) -> dict | None:
+    """Registro do aluno em outra base: pelo nome (ver _pick) ou, se nao achar, pelo nome sem as particulas com a
+    mesma data de nascimento (grafias como 'DANILO DE AMORIM' x 'DANILO AMORIM')."""
+    c = _pick(por_nome.get(nn, []), nasc, campo_nasc)
+    if c or not nasc:
+        return c
+    iguais = [x for x in por_chave.get(chave_nome(nn), []) if (x.get(campo_nasc) or "")[:10] == nasc]
+    return iguais[0] if len(iguais) == 1 else None
 
 
 def _pick(cands: list[dict], nasc: str, campo_nasc: str) -> dict | None:
@@ -101,9 +113,9 @@ def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
         g.update({k: aj[k] for k in corrigidos})
         nn = norm_nome(g["aluno"]) if "aluno" in corrigidos else g["nome_norm"]
         nasc = g["dt_nasc"]
-        c = _pick(bases.censo.get(nn, []), nasc, "dt_nasc")
-        s = _pick(bases.smtt.get(nn, []), nasc, "nascido")
-        st = bases.status_id.get(g["id_aluno"]) or _pick(bases.status_nome.get(nn, []), nasc, "nascimento")
+        c = achar(bases.censo, bases.censo_ch, nn, nasc, "dt_nasc")
+        s = achar(bases.smtt, bases.smtt_ch, nn, nasc, "nascido")
+        st = achar(bases.status_nome, bases.status_ch, nn, nasc, "nascimento")
         cpf_g, cpf_c, cpf_s = g["cpf"] or "", (c or {}).get("cpf") or "", (s or {}).get("cpf") or ""
         cpf_st = norm_cpf((st or {}).get("cpf"))
         cpf_m = norm_cpf(aj.get("cpf"))
@@ -158,6 +170,49 @@ def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
         a["apto"] = (a["cpf"] not in ("", DIVERGENTE) and not a["criticas"]
                      and not {"cpf_invalido", "cpf_duplicado", "sem_mae", "mae_incompleta"} & set(p))
     return out
+
+
+def conferencia_status(con, escola, alunos: list[dict] | None = None) -> dict:
+    """Matriculados no sistema (GEDUC + cadastro individual) x base Alunos por status da mesma instituicao."""
+    alunos = alunos if alunos is not None else alunos_da_escola(con, escola)
+    alvo = {norm_nome(escola["geduc_nome"] or escola["nome"]), norm_nome(escola["nome"])}
+    status = [dict(r) for r in con.execute("SELECT * FROM status_alunos") if norm_nome(r["escola"]) in alvo]
+
+    def chave(nome, nasc):
+        return chave_nome(nome), (nasc or "")[:10]
+
+    sis = {chave(a["nome_norm"], a["dt_nasc"]) for a in alunos}
+    sis_nome = {chave_nome(a["nome_norm"]) for a in alunos}
+    st_keys = {chave(s["nome_norm"], s["nascimento"]) for s in status}
+    st_nome = {chave_nome(s["nome_norm"]) for s in status}
+
+    def casa(k, conj, conj_nome, tem_data):  # sem data de um dos lados, vale o nome
+        return k in conj or (not tem_data and k[0] in conj_nome)
+
+    so_status = []
+    for s in status:
+        if casa(chave(s["nome_norm"], s["nascimento"]), sis, sis_nome, bool(s["nascimento"])):
+            continue
+        outra = [r["escola"] for r in con.execute("SELECT escola, dt_nasc FROM geduc WHERE nome_norm=?", (s["nome_norm"],))
+                 if not s["nascimento"] or (r["dt_nasc"] or "")[:10] == s["nascimento"]]
+        so_status.append({**{k: s.get(k) or "" for k in ("aluno", "nascimento", "turma", "turno", "sexo", "mae", "pai", "cpf",
+                                                           "telefone", "matricula", "endereco", "numero", "bairro", "situacao")},
+                          "outra_escola": outra[0] if outra else ""})
+    so_sistema = [{k: a[k] for k in ("id_aluno", "aluno", "dt_nasc", "turma", "turno", "manual")} for a in alunos
+                  if status and not casa(chave(a["nome_norm"], a["dt_nasc"]), st_keys, st_nome, bool(a["dt_nasc"]))]
+    # mesmo aluno com o nome digitado de outro jeito: mesma data de nascimento e nome muito parecido
+    nome_diferente = []
+    for s in list(so_status):
+        cands = [(SequenceMatcher(None, chave_nome(s["aluno"]), chave_nome(a["aluno"])).ratio(), a) for a in so_sistema
+                 if s["nascimento"] and a["dt_nasc"] == s["nascimento"]]
+        sim, a = max(cands, key=lambda x: x[0], default=(0, None))
+        if a and sim >= 0.8:
+            nome_diferente.append({"status": s, "sistema": a, "similaridade": round(sim, 2)})
+            so_status.remove(s)
+            so_sistema.remove(a)
+    return {"total_sistema": len(alunos), "total_status": len(status),
+            "em_ambos": len(status) - len(so_status) - len(nome_diferente), "nome_diferente": nome_diferente,
+            "so_status": sorted(so_status, key=lambda x: x["aluno"]), "so_sistema": sorted(so_sistema, key=lambda x: x["aluno"])}
 
 
 def resumo(alunos: list[dict]) -> dict:

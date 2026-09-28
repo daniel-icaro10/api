@@ -115,6 +115,9 @@ td b{font-weight:600;color:var(--ink)}
 .cpf-div{color:var(--err);font-weight:700}
 .alert{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:13px;border:1px solid transparent}.alert a{font-weight:600}
 .alert.warn{background:var(--warn-soft);color:var(--warn);border-color:#fde2bd}
+.tb-conf td:first-child{min-width:230px}
+.badge.quebra{white-space:normal;max-width:190px}
+.alert.conf{display:flex;gap:14px;align-items:center;justify-content:space-between}
 .alert.info{background:var(--blue-soft);color:var(--blue-2);border-color:var(--blue-soft-2)}
 .empty{padding:56px 20px;text-align:center;color:var(--muted)}
 

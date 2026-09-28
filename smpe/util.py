@@ -18,6 +18,11 @@ def norm_nome(s) -> str:
 _PARTICULAS = {"DA", "DE", "DO", "DAS", "DOS", "E", "D"}
 
 
+def chave_nome(s) -> str:
+    """Nome sem as particulas (DA, DE, DOS...): 'DANILO DE AMORIM FONSECA' = 'DANILO AMORIM FONSECA'."""
+    return " ".join(p for p in norm_nome(s).split() if p not in _PARTICULAS)
+
+
 def nome_completo(s) -> bool:
     """Nome e sobrenome: ao menos duas palavras, sem contar as particulas (DA, DE, DOS...)."""
     return len([p for p in norm_nome(s).split() if p not in _PARTICULAS]) >= 2

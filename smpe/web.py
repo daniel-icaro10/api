@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import critica, db, exportar, fichas, importer, logic, pdf
-from .util import cpf_valido, norm_cpf, norm_nome, so_digitos
+from .util import chave_nome, cpf_valido, norm_cpf, norm_nome, so_digitos
 
 @asynccontextmanager
 async def _ciclo(_app):
@@ -722,6 +722,13 @@ def escolas_geduc(sugerir_para: str = "", u: dict = Depends(admin)):
 
 # ------------------------------------------------------------------ alunos / matriculados
 
+@app.get("/api/escolas/{eid}/conferencia")
+def conferencia(eid: int, u: dict = Depends(usuario)):
+    """Diferencas entre os matriculados do sistema e a base Alunos por status da instituicao."""
+    con = db.connect()
+    return logic.conferencia_status(con, _escola(con, eid, u))
+
+
 @app.get("/api/escolas/{eid}/alunos")
 def alunos(eid: int, u: dict = Depends(usuario)):
     con = db.connect()
@@ -917,18 +924,26 @@ def detalhe_aluno(id_aluno: str, u: dict = Depends(usuario)):
     _checa_aluno(con, u, id_aluno)
     aj = con.execute("SELECT * FROM ajustes WHERE id_aluno=?", (id_aluno,)).fetchone()
     nn = norm_nome(aj["aluno"]) if aj and aj["aluno"] else g["nome_norm"]
-    censo = [dict(r) for r in con.execute("SELECT * FROM censo WHERE nome_norm=?", (nn,))]
-    smtt = [dict(r) for r in con.execute("SELECT * FROM smtt WHERE nome_norm=?", (nn,))]
-    status = [dict(r) for r in con.execute("SELECT * FROM status_alunos WHERE id_aluno=? OR nome_norm=?", (id_aluno, nn))]
+    nasc = (aj["dt_nasc"] if aj and aj["dt_nasc"] else "") or g["dt_nasc"] or ""
+
+    def registros(tabela, campo_nasc):
+        """Mesmo nome, ou mesmo nome sem as particulas com a mesma data de nascimento (regra do cruzamento).
+        O ID_ALUNO do Alunos por status e de outra numeracao e nao e usado."""
+        rows = [dict(r) for r in con.execute(f"SELECT * FROM {tabela} WHERE nome_norm=? OR {campo_nasc} LIKE ?",
+                                             (nn, f"{nasc}%" if nasc else "-"))]
+        mesmo = [r for r in rows if r["nome_norm"] == nn]
+        return mesmo or [r for r in rows if chave_nome(r["nome_norm"]) == chave_nome(nn)
+                         and (r[campo_nasc] or "")[:10] == nasc]
+
+    censo, smtt, status = registros("censo", "dt_nasc"), registros("smtt", "nascido"), registros("status_alunos", "nascimento")
     lotes = [dict(r) for r in con.execute(
         """SELECT l.id, l.escola_id, l.criado_em, l.arquivo, e.nome escola FROM lote_alunos la
            JOIN lotes l ON l.id=la.lote_id JOIN escolas e ON e.id=l.escola_id WHERE la.id_aluno=?""", (id_aluno,))]
     if not _eh_admin(u):
         # a instituicao ve so o registro usado no cruzamento (homonimos de outras instituicoes ficam de fora)
-        nasc = (aj["dt_nasc"] if aj and aj["dt_nasc"] else "") or g["dt_nasc"]
         um = lambda rows, campo: [x] if (x := logic._pick(rows, nasc, campo)) else []
         censo, smtt = um(censo, "dt_nasc"), um(smtt, "nascido")
-        status = [x for x in status if x["id_aluno"] == id_aluno] or um(status, "nascimento")
+        status = um(status, "nascimento")
         lotes = [x for x in lotes if x["escola_id"] == u["escola_id"]]
     return {"geduc": g, "censo": censo, "smtt": smtt, "status": status, "ajuste": dict(aj) if aj else None,
             "lotes": lotes}
