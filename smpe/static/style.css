@@ -221,6 +221,23 @@ nav{overflow-y:auto;min-height:0}
 .turnos label{display:flex;gap:5px;align-items:center;margin:0;font-weight:500;color:var(--ink)}
 .turnos input{width:auto}
 .cnt{float:right;font-weight:500;color:var(--muted)}
+/* quadros das fichas da SMTT no formulario da instituicao */
+table.grade th,table.grade td{padding:5px 8px;font-size:12.5px}
+table.grade td:first-child{white-space:nowrap}
+table.grade input{width:74px;padding:5px 7px;text-align:center}
+table.grade input[type=checkbox]{width:auto}
+table.grade input[type=date]{width:138px;padding:5px 6px}
+table.grade td.doc-tipo{white-space:normal;min-width:160px}
+details.resp{border:1px dashed var(--line);border-radius:var(--radius-sm);padding:8px 12px}
+details.resp summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--blue)}
+details.resp table{margin-top:8px}
+.ficha-lista{display:flex;flex-direction:column;gap:12px}
+.ficha{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px}
+.ficha ul{margin:6px 0 0;padding-left:18px;font-size:12.5px}
+.ficha ul.pend{color:var(--warn)}
+.ficha ul.reps{list-style:none;padding:0}
+.ficha ul.reps li{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:4px 0;border-top:1px dashed var(--line)}
+.ficha .ok-txt{margin:6px 0 0;font-size:12.5px;color:var(--ok)}
 .cnt.over{color:var(--err);font-weight:700}
 .campo-longo input{border-color:var(--err);background:var(--err-soft)}
 .pend-cell{display:flex;flex-wrap:wrap;align-items:center;gap:2px}

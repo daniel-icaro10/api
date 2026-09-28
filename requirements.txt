@@ -6,3 +6,4 @@ python-multipart
 psycopg[binary]
 reportlab
 xlrd
+pypdf

@@ -565,7 +565,7 @@ async function escolas() {
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
       <td>${e.logins?.length ? e.logins.map(l => `<div>${esc(fmtLogin(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
       <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : `<span class="badge b-ok">ativa</span>`}</td>
-      <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${e.id}">Editar</button>
+      <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${e.id}">Editar</button><button class="btn-dl btn-sm" data-fi="${e.id}">${icDl}Fichas</button>
         <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
   const filtradas = () => { const q = $("#fE").value.toLowerCase(); return ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q); };
   XLS.escolas = () => ({titulo: "Instituições", subtitulo: $("#fE").value && `Filtro: ${$("#fE").value}`,
@@ -587,6 +587,7 @@ async function escolas() {
   $("#tbE").onclick = ev => {
     const b = ev.target.closest("button"); if (!b) return;
     if (b.dataset.ed) editarEscola(+b.dataset.ed);
+    if (b.dataset.fi) fichasModal(+b.dataset.fi);
     if (b.dataset.bl) bloqueioEscola(+b.dataset.bl);
   };
 }
@@ -610,25 +611,74 @@ async function bloqueioEscola(id) {
     closeModal(); toast("Acesso bloqueado"); escolas();
   };
 }
-// formulario da instituicao em abas: dados cadastrais, representantes (varios) e cursos (varios)
+// formulario da instituicao em abas: dados cadastrais, representantes (varios), cursos (varios) e estrutura/documentos.
+// Os campos seguem as fichas da SMTT (Central de Atendimento ao Estudante), geradas em PDF no layout oficial.
 const TURNOS = [["M", "Matutino"], ["V", "Vespertino"], ["N", "Noturno"], ["I", "Integral"]];
-const repRow = (r = {}) => `<div class="sub-row rep-row"><div class="form">
-    <div class="full"><label>Nome</label><input data-k="nome" value="${esc(r.nome || "")}" required></div>
+const T4 = ["M", "V", "N", "I"];
+const TIPOS_FICHA = ["Educação Infantil", "Ensino Fundamental I", "Ensino Fundamental II", "Ensino Médio", "Pré-Vestibular",
+  "Educação Especial", "Educação Profissional", "Educação de Jovens e Adultos (EJA)", "Ensino Superior", "Outro"];  // codigo = posicao + 1
+const MODALIDADES = ["Presencial", "Semipresencial", "À distância (100% EAD)"];
+const REDES = [["MUNICIPAL", "Municipal"], ["ESTADUAL", "Estadual"], ["FEDERAL", "Federal"], ["PARTICULAR", "Particular"], ["FILANTROPICA", "Filantrópica"]];
+const COMPLEMENTARES = [["salas", "Salas de aula"], ["vagas", "Vagas oferecidas"], ["alunos", "Alunos matriculados"], ["professores", "Professores"], ["funcionarios", "Funcionários"]];
+const DOCUMENTOS = [["ato_criacao", "Ato de criação"], ["termo_reconhecimento", "Termo de reconhecimento ou autorização do ME/CEE/CME"], ["alvara", "Alvará de funcionamento"]];
+const FUNCOES = [["diretor", "Diretor(a) ou Reitor(a)"], ["adjunto", "Diretor(a) adjunto(a) ou Vice-reitor(a)"]];
+const opcoes = (ops, v) => ops.map(([o, l]) => `<option value="${o}" ${String(v ?? "") === o ? "selected" : ""}>${l}</option>`).join("");
+const selK = (k, ops, v, vazio = "—") => `<select data-k="${k}"><option value="">${vazio}</option>${opcoes(ops, v)}</select>`;
+const TIPO_OPTS = TIPOS_FICHA.map((t, i) => [String(i + 1), `${i + 1} · ${t}`]);
+const numIn = (attr, v) => `<input type="number" min="0" step="1" ${attr} value="${v ?? ""}">`;
+
+const repRow = (r = {}) => {
+  const resp = r.responsabilidade || {}, n = Object.values(resp).reduce((s, v) => s + v.length, 0);
+  return `<div class="sub-row rep-row"><div class="form">
+    <div class="full"><label>Nome do representante</label><input data-k="nome" value="${esc(r.nome || "")}" required></div>
     <div><label>CPF</label><input data-k="cpf" value="${esc(fmtCPF(r.cpf || ""))}" inputmode="numeric"></div>
+    <div><label>RG</label><input data-k="rg" value="${esc(r.rg || "")}"></div>
+    <div><label>Órgão expedidor</label><input data-k="org_exp" value="${esc(r.org_exp || "")}" placeholder="Ex.: SSP/MA"></div>
+    <div><label>Data de expedição</label><input data-k="data_exp" type="date" value="${esc(r.data_exp || "")}"></div>
     <div><label>Cargo / função</label><input data-k="cargo" value="${esc(r.cargo || "")}" placeholder="Ex.: Gestor(a), Secretário(a)"></div>
-    <div><label>Contato</label><input data-k="contato" value="${esc(r.contato || "")}" placeholder="(98) 90000-0000"></div>
+    <div><label>Assina a ficha da instituição como</label>${selK("funcao_ficha", FUNCOES, r.funcao_ficha, "Não assina")}</div>
+    <div><label>Telefone</label><input data-k="contato" value="${esc(r.contato || "")}" placeholder="(98) 90000-0000"></div>
     <div><label>E-mail</label><input data-k="email" type="email" value="${esc(r.email || "")}"></div>
+    <div class="full"><label>Endereço</label><input data-k="endereco" value="${esc(r.endereco || "")}" placeholder="Rua, número, complemento"></div>
+    <div><label>Bairro</label><input data-k="bairro" value="${esc(r.bairro || "")}"></div>
+    <div><label>CEP</label><input data-k="cep" value="${esc(r.cep || "")}" inputmode="numeric" placeholder="00000-000"></div>
+    <div><label>Município</label><input data-k="municipio" value="${esc(r.municipio || "")}" placeholder="SAO LUIS"></div>
+    <details class="full resp" ${n ? "open" : ""}><summary>Turno e tipo de ensino de responsabilidade do representante</summary>
+      <table class="grade"><thead><tr><th>Tipo de ensino</th>${["MAT", "VESP", "NOT", "INTEG"].map(l => `<th>${l}</th>`).join("")}</tr></thead><tbody>
+      ${TIPOS_FICHA.map((t, i) => `<tr><td>${t}</td>${T4.map(tn => `<td><input type="checkbox" data-resp="${i + 1}" value="${tn}" ${(resp[i + 1] || []).includes(tn) ? "checked" : ""}></td>`).join("")}</tr>`).join("")}
+      </tbody></table></details>
   </div><button type="button" class="btn-sm danger sub-del">Remover</button></div>`;
+};
 const cursoRow = (c = {}) => `<div class="sub-row curso-row"><div class="form">
-    <div><label>Curso / tipo de ensino</label><input data-k="curso" list="dlCursos" maxlength="25" value="${esc(c.curso || "")}" required></div>
-    <div><label>Grau</label><select data-k="grau">${["1", "2", "3"].map(g => `<option ${(c.grau || "1") === g ? "selected" : ""}>${g}</option>`).join("")}</select></div>
+    <div class="full"><label>Descrição do curso</label><input data-k="curso" list="dlCursos" maxlength="25" value="${esc(c.curso || "")}" required></div>
+    <div><label>Tipo de ensino (ficha SMTT)</label>${selK("tipo_ensino", TIPO_OPTS, c.tipo_ensino)}</div>
+    <div><label>Modalidade</label>${selK("modalidade", MODALIDADES.map((m, i) => [String(i + 1), `${i + 1} · ${m}`]), c.modalidade)}</div>
+    <div><label>Grau (remessa)</label><select data-k="grau">${["1", "2", "3"].map(g => `<option ${(c.grau || "1") === g ? "selected" : ""}>${g}</option>`).join("")}</select></div>
     <div><label>Séries / períodos</label><input data-k="series" value="${esc(c.series || "")}" placeholder="Ex.: 1 a 9"></div>
-    <div><label>Turnos</label><div class="turnos">${TURNOS.map(([v, l]) => `<label><input type="checkbox" value="${v}" ${(c.turnos || "").split(",").includes(v) ? "checked" : ""}>${l}</label>`).join("")}</div></div>
+    <div class="full"><label>Turnos</label><div class="turnos">${TURNOS.map(([v, l]) => `<label><input type="checkbox" value="${v}" ${(c.turnos || "").split(",").includes(v) ? "checked" : ""}>${l}</label>`).join("")}</div></div>
   </div><button type="button" class="btn-sm danger sub-del">Remover</button></div>`;
+function paneEstrutura(fc) {
+  const salas = fc.salas || {}, compl = fc.complementares || {}, docs = fc.documentos || {};
+  return `<p class="muted" style="margin-top:0">Quadros da <b>Ficha de cadastro da instituição de ensino</b>. Deixe em branco o que não se aplica.</p>
+    <h3>Tipo de ensino e quantidade de salas por turno</h3>
+    <div class="table-wrap" style="max-height:none"><table class="grade"><thead><tr><th>Tipo de ensino</th>${TURNOS.map(([, l]) => `<th>${l}</th>`).join("")}<th>Nº salas</th></tr></thead><tbody>
+      ${TIPOS_FICHA.map((t, i) => `<tr><td>${t}</td>${[...T4, "salas"].map(k => `<td>${numIn(`data-sala="${i + 1}" data-t="${k}"`, salas[i + 1]?.[k])}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>
+    <h3>Informações complementares sobre a instituição</h3>
+    <div class="table-wrap" style="max-height:none"><table class="grade"><thead><tr><th>Quantidade de</th>${TURNOS.map(([, l]) => `<th>${l}</th>`).join("")}<th>Total</th></tr></thead><tbody>
+      ${COMPLEMENTARES.map(([k, l]) => `<tr><td>${l}</td>${T4.map(tn => `<td>${numIn(`data-compl="${k}" data-t="${tn}"`, compl[k]?.[tn])}</td>`).join("")}<td class="num"><b data-tot="${k}"></b></td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn-sm" id="alunosGeduc">Preencher “Alunos matriculados” com os alunos do sistema, por turno</button></div>
+    <h3>Documentação</h3>
+    <div class="table-wrap" style="max-height:none"><table class="grade"><thead><tr><th>Tipo</th><th>Número</th><th>Data de expedição</th><th>Validade</th></tr></thead><tbody>
+      ${DOCUMENTOS.map(([k, l]) => `<tr><td class="doc-tipo">${l}</td><td><input data-doc="${k}" data-t="numero" value="${esc(docs[k]?.numero || "")}" style="width:130px" maxlength="40"></td>
+        <td><input type="date" data-doc="${k}" data-t="data" value="${esc(docs[k]?.data || "")}"></td><td><input type="date" data-doc="${k}" data-t="validade" value="${esc(docs[k]?.validade || "")}"></td></tr>`).join("")}
+    </tbody></table></div>`;
+}
 async function editarEscola(id) {
-  const e = ESCOLAS.find(x => x.id === id) || {nome: "", cod_smtt: "", inep: "", geduc_nome: "", nivel: "ENSINO FUNDAMENTAL", representantes: [], cursos: []};
+  const e = ESCOLAS.find(x => x.id === id) || {nome: "", cod_smtt: "", inep: "", geduc_nome: "", nivel: "ENSINO FUNDAMENTAL", municipio: "SAO LUIS", representantes: [], cursos: [], ficha: {}};
   const sug = e.nome ? await api("/api/geduc/escolas?sugerir_para=" + encodeURIComponent(e.nome)) : await api("/api/geduc/escolas");
-  const abas = [["dados", "Dados cadastrais"], ["reps", "Representantes"], ["cursos", "Cursos"]];
+  const abas = [["dados", "Dados cadastrais"], ["reps", "Representantes"], ["cursos", "Cursos"], ["estrutura", "Estrutura e documentos"]];
   modal(`<div class="mh"><h2>${id ? "Editar instituição" : "Nova instituição"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
     <form id="fEsc"><div class="mb">
       <div class="tabs" id="escTabs" style="margin-bottom:16px">${abas.map(([k, l], i) => `<button type="button" class="tab ${i ? "" : "active"}" data-aba="${k}">${l} <span class="n" data-n="${k}"></span></button>`).join("")}</div>
@@ -639,22 +689,29 @@ async function editarEscola(id) {
         <div><label>Código SMTT (4 dígitos)</label><input name="cod_smtt" value="${esc(e.cod_smtt)}" maxlength="4"></div>
         <div><label>Código INEP</label><input name="inep" value="${esc(e.inep)}"></div>
         <div><label>CNPJ</label><input name="cnpj" value="${esc(fmtCNPJ(e.cnpj))}" inputmode="numeric" placeholder="00.000.000/0000-00"></div>
-        <div><label>E-mail</label><input name="email" type="email" value="${esc(e.email || "")}"></div>
+        <div><label>Rede de ensino</label><select name="rede"><option value="">—</option>${opcoes(REDES, e.rede)}</select></div>
+        <div class="full"><label>Endereço</label><input name="endereco" value="${esc(e.endereco || "")}" placeholder="Rua, número, complemento"></div>
+        <div><label>Bairro</label><input name="bairro" value="${esc(e.bairro || "")}"></div>
+        <div><label>Município</label><input name="municipio" value="${esc(e.municipio || "")}" placeholder="SAO LUIS"></div>
+        <div><label>CEP</label><input name="cep" value="${esc(e.cep || "")}" inputmode="numeric" placeholder="00000-000"></div>
+        <div><label>Telefone</label><input name="telefone" value="${esc(e.telefone || "")}" placeholder="(98) 3000-0000"></div>
+        <div class="full"><label>E-mail</label><input name="email" type="email" value="${esc(e.email || "")}"></div>
         <div class="full"><label>Vínculo com o GEDUC (nome da instituição na base GEDUC)</label>
           <select name="geduc_nome"><option value="">Usar o mesmo nome do cadastro</option>${sug.slice(0, 400).map(s =>
             `<option value="${esc(s.escola)}" ${s.escola.trim() === (e.geduc_nome || "").trim() ? "selected" : ""}>${esc(s.escola)} — ${fmtN(s.alunos)} alunos${s.similaridade != null ? ` (${Math.round(s.similaridade * 100)}%)` : ""}</option>`).join("")}</select>
           <small class="muted">Ordenado por semelhança com o nome. Também cruza pelo INEP, se informado.</small></div>
       </div>
       <div data-pane="reps" hidden>
-        <p class="muted" style="margin-top:0">Pessoas que respondem pela instituição (gestor, secretário, responsável pelo transporte…).</p>
+        <p class="muted" style="margin-top:0">Pessoas que respondem pela instituição. Cada uma gera uma <b>Ficha de cadastro do representante</b>. Marque quem assina a ficha da instituição como diretor(a) e como adjunto(a).</p>
         <div id="repList">${(e.representantes || []).map(repRow).join("")}</div>
         <button type="button" id="addRep">+ Adicionar representante</button>
       </div>
       <div data-pane="cursos" hidden>
-        <p class="muted" style="margin-top:0">Cursos oferecidos. Aparecem como opções de <b>Tipo de ensino</b> no cadastro e na correção dos alunos desta instituição.</p>
+        <p class="muted" style="margin-top:0">Cursos oferecidos. Formam a <b>Relação de cursos da instituição</b> e aparecem como opções de Tipo de ensino no cadastro e na correção dos alunos.</p>
         <div id="cursoList">${(e.cursos || []).map(cursoRow).join("")}</div>
         <button type="button" id="addCurso">+ Adicionar curso</button>
       </div>
+      <div data-pane="estrutura" hidden>${paneEstrutura(e.ficha || {})}</div>
       <datalist id="dlCursos">${TIPOS_ENSINO.map(t => `<option value="${t}">`).join("")}</datalist>
     </div>
     <div class="mf">${id ? `<button type="button" class="danger" id="delEsc">Excluir</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
@@ -667,19 +724,63 @@ async function editarEscola(id) {
   $("#addRep").onclick = () => { $("#repList").insertAdjacentHTML("beforeend", repRow()); contar(); $("#repList .rep-row:last-child input").focus(); };
   $("#addCurso").onclick = () => { $("#cursoList").insertAdjacentHTML("beforeend", cursoRow()); contar(); $("#cursoList .curso-row:last-child input").focus(); };
   f.addEventListener("click", ev => { if (ev.target.matches(".sub-del")) { ev.target.closest(".sub-row").remove(); contar(); } });
-  contar();
+  // totais das informacoes complementares
+  const totais = () => COMPLEMENTARES.forEach(([k]) => {
+    const s = $$(`[data-compl="${k}"]`, f).reduce((a, i) => a + (+i.value || 0), 0), vazio = $$(`[data-compl="${k}"]`, f).every(i => i.value === "");
+    $(`[data-tot="${k}"]`, f).textContent = vazio ? "" : fmtN(s);
+  });
+  f.addEventListener("input", ev => { if (ev.target.dataset.compl) totais(); });
+  totais(); contar();
+  $("#alunosGeduc").onclick = async () => {
+    if (!id) return toast("Salve a instituição antes de buscar os alunos");
+    const d = await api(`/api/escolas/${id}/alunos`), cont = {M: 0, V: 0, N: 0, I: 0};
+    d.alunos.forEach(a => { const t = (a.turno || "").trim().toUpperCase()[0]; if (t in cont) cont[t]++; });
+    T4.forEach(tn => { $(`[data-compl="alunos"][data-t="${tn}"]`, f).value = cont[tn] || ""; });
+    totais(); toast(`${fmtN(d.alunos.length)} aluno(s) distribuídos por turno`);
+  };
   const campos = row => Object.fromEntries($$("[data-k]", row).map(i => [i.dataset.k, i.value]));
+  const grade = (attr) => { const o = {}; $$(`[data-${attr}]`, f).forEach(i => { if (i.value !== "") (o[i.dataset[attr]] ||= {})[i.dataset.t] = i.value; }); return o; };
   f.onsubmit = async ev => {
     ev.preventDefault();
     const d = Object.fromEntries(new FormData(f));
-    const representantes = $$(".rep-row", f).map(campos);
+    const representantes = $$(".rep-row", f).map(row => {
+      const resp = {};
+      $$("[data-resp]:checked", row).forEach(c => (resp[c.dataset.resp] ||= []).push(c.value));
+      return {...campos(row), responsabilidade: resp};
+    });
     const cursos = $$(".curso-row", f).map(row => ({...campos(row), turnos: $$(".turnos input:checked", row).map(x => x.value).join(",")}));
-    const body = {...e, ...d, id: id || (d.id ? +d.id : null), representantes, cursos};
+    const ficha = {salas: grade("sala"), complementares: grade("compl"), documentos: grade("doc")};
+    const body = {...e, ...d, id: id || (d.id ? +d.id : null), representantes, cursos, ficha};
     if (id) await api(`/api/escolas/${id}`, {method: "PUT", body}); else await api("/api/escolas", {method: "POST", body});
     closeModal(); toast("Instituição salva"); escolas();
   };
   const del = $("#delEsc");
   if (del) del.onclick = async () => { if (confirm("Excluir esta instituição? Os vínculos de usuários, os arquivos finais e os alunos do cadastro individual também serão excluídos.")) { await api(`/api/escolas/${id}`, {method: "DELETE"}); closeModal(); escolas(); } };
+}
+
+// fichas da SMTT: PDFs no layout oficial, com o que falta preencher em cada uma
+async function fichasModal(eid) {
+  if (!ESCOLAS.find(x => x.id === +eid)?.representantes) await loadEscolas();
+  const e = ESCOLAS.find(x => x.id === +eid);
+  if (!e) return toast("Instituição não encontrada");
+  const reps = e.representantes || [], cursos = e.cursos || [], url = t => `/api/escolas/${eid}/ficha/${t}`;
+  const falta = (cond, txt) => cond ? `<li>${txt}</li>` : "";
+  const pend = lista => lista.join("") ? `<ul class="pend">${lista.join("")}</ul>` : `<p class="ok-txt">Tudo preenchido.</p>`;
+  const inst = pend([falta(!e.cnpj, "CNPJ"), falta(!e.endereco || !e.bairro || !e.cep, "Endereço, bairro ou CEP"), falta(!e.telefone, "Telefone"),
+    falta(!e.rede, "Rede de ensino"), falta(!Object.keys(e.ficha?.salas || {}).length, "Salas por tipo de ensino e turno (aba Estrutura e documentos)"),
+    falta(!reps.some(r => r.funcao_ficha === "diretor"), "Representante marcado como Diretor(a) ou Reitor(a)")]);
+  const curs = pend([falta(!cursos.length, "Nenhum curso cadastrado"), falta(cursos.some(c => !c.tipo_ensino || !c.modalidade), "Curso sem tipo de ensino ou modalidade")]);
+  modal(`<div class="mh"><h2>Fichas da SMTT</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <div class="mb"><p class="muted" style="margin-top:0">${esc(e.nome)} · PDFs no layout da Central de Atendimento ao Estudante, prontos para imprimir e assinar. Usam os dados salvos no cadastro da instituição.</p>
+      <div class="ficha-lista">
+        <div class="ficha"><div><b>Ficha de cadastro da instituição de ensino</b>${inst}</div><a class="btn-dl" href="${url("instituicao")}">${icDl}PDF</a></div>
+        <div class="ficha"><div><b>Relação de cursos da instituição</b> <span class="muted">(${cursos.length} curso(s))</span>${curs}</div><a class="btn-dl" href="${url("cursos")}">${icDl}PDF</a></div>
+        <div class="ficha"><div><b>Ficha de cadastro do representante</b> <span class="muted">(uma página por representante)</span>
+          ${reps.length ? `<ul class="reps">${reps.map((r, i) => `<li><span>${esc(r.nome)}${r.cargo ? ` · ${esc(r.cargo)}` : ""}${!r.cpf || !r.rg ? ` <span class="badge b-warn">falta ${!r.cpf ? "CPF" : "RG"}</span>` : ""}</span><a class="btn-dl btn-sm" href="${url("representantes")}?rep=${i}">${icDl}PDF</a></li>`).join("")}</ul>` : `<ul class="pend"><li>Nenhum representante cadastrado</li></ul>`}</div>
+          <a class="btn-dl" href="${url("representantes")}">${icDl}Todos</a></div>
+      </div>
+      ${ehAdmin() ? `<p class="muted" style="margin-bottom:0">Para completar os dados, use <b>Instituições → Editar</b>.</p>` : `<p class="muted" style="margin-bottom:0">Para corrigir algum dado, fale com o administrador do sistema.</p>`}
+    </div>`);
 }
 
 // ------------------------------------------------------------------ remessas
@@ -816,7 +917,8 @@ async function relatorios(eid, qs) {
   $("#view").innerHTML = `<div class="row no-print" style="margin-bottom:14px"><div style="width:420px">${escolaSelect("selEscRel", eid)}</div>
       <div class="tabs">${Object.entries({sem_cpf: "Sem CPF", sem_mae: "Sem mãe", simplificada: "Simplificada (CPF mascarado)"}).map(([k, l]) =>
         `<button class="tab ${k === tipo ? "active" : ""}" data-t="${k}">${l}</button>`).join("")}</div>
-      <span class="spacer"></span>${eid ? btnXls("relatorio") : ""}<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="relDoc"></div>`;
+      <span class="spacer"></span>${eid ? `<button type="button" class="btn-dl" id="btnFichas">${icDl}Fichas SMTT</button>${btnXls("relatorio")}` : ""}<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="relDoc"></div>`;
+  if ($("#btnFichas")) $("#btnFichas").onclick = () => fichasModal(eid);
   $("#selEscRel").onchange = ev => location.hash = `#/relatorios/${ev.target.value}?tipo=${tipo}`;
   $$(".tabs .tab").forEach(b => b.onclick = () => location.hash = `#/relatorios/${eid}?tipo=${b.dataset.t}`);
   if (!eid) { $("#relDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }

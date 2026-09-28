@@ -1,14 +1,16 @@
 """API + telas do SIS SMPE."""
 import difflib
-from contextlib import asynccontextmanager
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
 import threading
 import time
 import traceback
+from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -16,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import critica, db, exportar, importer, logic, pdf
+from . import critica, db, exportar, fichas, importer, logic, pdf
 from .util import cpf_valido, norm_cpf, norm_nome, so_digitos
 
 @asynccontextmanager
@@ -427,6 +429,13 @@ class EscolaIn(BaseModel):
     desconto: float = 0
     cnpj: str | None = ""
     email: str | None = ""
+    endereco: str | None = ""
+    bairro: str | None = ""
+    municipio: str | None = ""
+    cep: str | None = ""
+    telefone: str | None = ""
+    rede: str | None = ""
+    ficha: dict | None = None  # salas por tipo de ensino/turno, informacoes complementares e documentos
     representantes: list["RepresentanteIn"] | None = None  # None = mantem os atuais
     cursos: list["CursoIn"] | None = None
 
@@ -437,6 +446,15 @@ class RepresentanteIn(BaseModel):
     cargo: str | None = ""
     contato: str | None = ""
     email: str | None = ""
+    rg: str | None = ""
+    org_exp: str | None = ""
+    data_exp: str | None = ""
+    endereco: str | None = ""
+    bairro: str | None = ""
+    cep: str | None = ""
+    municipio: str | None = ""
+    funcao_ficha: str | None = ""  # diretor | adjunto (declaracao da ficha da instituicao)
+    responsabilidade: dict | None = None  # {"1": ["M", "V"], ...}: tipo de ensino -> turnos
 
 
 class CursoIn(BaseModel):
@@ -444,14 +462,71 @@ class CursoIn(BaseModel):
     grau: str | None = "1"
     series: str | None = ""
     turnos: str | None = ""
+    tipo_ensino: str | None = ""  # 1 a 10 (legenda da relacao de cursos da SMTT)
+    modalidade: str | None = ""  # 1 presencial, 2 semipresencial, 3 a distancia
 
 
 EscolaIn.model_rebuild()
 
 ESCOLA_COLS = ("nome", "cod_smtt", "inep", "geduc_nome", "nivel", "matriculados_info", "peticionamento", "desconto",
-               "cnpj", "email")
-REP_COLS = ("nome", "cpf", "cargo", "contato", "email")
-CURSO_COLS = ("curso", "grau", "series", "turnos")
+               "cnpj", "email", "endereco", "bairro", "municipio", "cep", "telefone", "rede", "ficha")
+REP_COLS = ("nome", "cpf", "cargo", "contato", "email", "rg", "org_exp", "data_exp", "endereco", "bairro", "cep",
+            "municipio", "funcao_ficha", "responsabilidade")
+CURSO_COLS = ("curso", "grau", "series", "turnos", "tipo_ensino", "modalidade")
+TIPOS_ENSINO = [str(i) for i in range(1, 11)]
+
+
+def _data_iso(v: str, campo: str) -> str:
+    if not v:
+        return ""
+    try:
+        return date.fromisoformat(v[:10]).isoformat()
+    except ValueError:
+        raise HTTPException(400, f"{campo}: data inválida")
+
+
+def _inteiro(v) -> int | None:
+    if v in (None, ""):
+        return None
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"Quantidade inválida: {v}")
+    if n < 0 or n > 100000:
+        raise HTTPException(400, f"Quantidade inválida: {v}")
+    return n
+
+
+def _ficha_limpa(f: dict) -> str:
+    """So as chaves conhecidas da ficha da instituicao, com numeros e datas validados."""
+    salas = {}
+    for k in TIPOS_ENSINO:
+        s = (f.get("salas") or {}).get(k) or {}
+        v = {t: n for t in fichas.TURNOS + ["salas"] if (n := _inteiro(s.get(t))) is not None}
+        if v:
+            salas[k] = v
+    compl = {}
+    for k in fichas.COMPLEMENTARES:
+        s = (f.get("complementares") or {}).get(k) or {}
+        v = {t: n for t in fichas.TURNOS if (n := _inteiro(s.get(t))) is not None}
+        if v:
+            compl[k] = v
+    docs = {}
+    for k in fichas.DOCUMENTOS:
+        d = (f.get("documentos") or {}).get(k) or {}
+        v = {"numero": str(d.get("numero") or "").strip().upper()[:40],
+             "data": _data_iso(str(d.get("data") or "").strip(), "Documentação"),
+             "validade": _data_iso(str(d.get("validade") or "").strip(), "Documentação")}
+        if any(v.values()):
+            docs[k] = v
+    return json.dumps({"salas": salas, "complementares": compl, "documentos": docs}, ensure_ascii=False)
+
+
+def _json(s) -> dict:
+    try:
+        return json.loads(s) if s else {}
+    except (TypeError, ValueError):
+        return {}
 
 
 def _limpo(m: BaseModel) -> dict:
@@ -460,15 +535,23 @@ def _limpo(m: BaseModel) -> dict:
     return {k: (v or "").strip() if k in texto else v for k, v in m.model_dump().items()}
 
 
-def _escola_vals(e: EscolaIn) -> list:
+def _escola_vals(e: EscolaIn, atual=None) -> list:
     d = _limpo(e)
     if not d["nome"]:
         raise HTTPException(400, "Informe o nome da instituição")
-    d["cnpj"] = so_digitos(d["cnpj"])
+    d["cnpj"], d["cep"] = so_digitos(d["cnpj"]), so_digitos(d["cep"])
     if d["cnpj"] and len(d["cnpj"]) != 14:
         raise HTTPException(400, "CNPJ deve ter 14 dígitos")
+    if d["cep"] and len(d["cep"]) != 8:
+        raise HTTPException(400, "CEP da instituição deve ter 8 dígitos")
     if d["email"] and not EMAIL_RE.fullmatch(d["email"]):
         raise HTTPException(400, "E-mail da instituição inválido")
+    d["rede"] = d["rede"].upper()
+    if d["rede"] and d["rede"] not in fichas.REDES:
+        raise HTTPException(400, "Rede de ensino inválida")
+    for k in ("endereco", "bairro", "municipio"):
+        d[k] = d[k].upper()
+    d["ficha"] = _ficha_limpa(e.ficha) if e.ficha is not None else ((atual["ficha"] if atual else "") or "")
     return [d[c] for c in ESCOLA_COLS]
 
 
@@ -480,14 +563,30 @@ def _representantes(e: EscolaIn) -> list[list] | None:
         d = _limpo(r)
         if not any(d.values()):
             continue
+        resp = d.pop("responsabilidade") or {}
+        if not any(d.values()) and not resp:
+            continue
         d["nome"], d["cargo"], d["cpf"] = d["nome"].upper(), d["cargo"].upper(), so_digitos(d["cpf"])
+        for k in ("org_exp", "endereco", "bairro", "municipio"):
+            d[k] = d[k].upper()
+        d["cep"] = so_digitos(d["cep"])
         if not d["nome"]:
             raise HTTPException(400, f"Representante {i}: informe o nome")
+        if d["cep"] and len(d["cep"]) != 8:
+            raise HTTPException(400, f"Representante {d['nome']}: CEP deve ter 8 dígitos")
+        d["data_exp"] = _data_iso(d["data_exp"], f"Representante {d['nome']}")
+        if d["funcao_ficha"] not in ("", "diretor", "adjunto"):
+            raise HTTPException(400, f"Representante {d['nome']}: função na ficha inválida")
+        d["responsabilidade"] = json.dumps({k: [t for t in fichas.TURNOS if t in (resp.get(k) or [])]
+                                            for k in TIPOS_ENSINO if set(resp.get(k) or []) & set(fichas.TURNOS)})
         if d["cpf"] and not cpf_valido(d["cpf"]):
             raise HTTPException(400, f"Representante {d['nome']}: CPF inválido")
         if d["email"] and not EMAIL_RE.fullmatch(d["email"]):
             raise HTTPException(400, f"Representante {d['nome']}: e-mail inválido")
         out.append([d[c] for c in REP_COLS])
+    for f, nome in (("diretor", "Diretor(a) ou Reitor(a)"), ("adjunto", "Diretor(a) adjunto(a) ou Vice-reitor(a)")):
+        if sum(1 for r in out if r[REP_COLS.index("funcao_ficha")] == f) > 1:
+            raise HTTPException(400, f"Só um representante pode ser {nome} na ficha")
     return out
 
 
@@ -506,6 +605,10 @@ def _cursos(e: EscolaIn) -> list[list] | None:
             raise HTTPException(400, f"Curso {d['curso']}: máximo de 25 caracteres (tamanho do campo CURSO da remessa)")
         if d["grau"] not in ("1", "2", "3"):
             raise HTTPException(400, f"Curso {d['curso']}: grau deve ser 1, 2 ou 3")
+        if d["tipo_ensino"] not in ("", *TIPOS_ENSINO):
+            raise HTTPException(400, f"Curso {d['curso']}: tipo de ensino inválido")
+        if d["modalidade"] not in ("", "1", "2", "3"):
+            raise HTTPException(400, f"Curso {d['curso']}: modalidade inválida")
         out.append([d[c] for c in CURSO_COLS])
     return out
 
@@ -513,12 +616,12 @@ def _cursos(e: EscolaIn) -> list[list] | None:
 def _grava_filhos(con, eid: int, reps: list | None, cursos: list | None):
     if reps is not None:
         con.execute("DELETE FROM representantes WHERE escola_id=?", (eid,))
-        con.executemany(f"INSERT INTO representantes (escola_id, {', '.join(REP_COLS)}) VALUES (?,?,?,?,?,?)",
-                        [(eid, *r) for r in reps])
+        con.executemany(f"INSERT INTO representantes (escola_id, {', '.join(REP_COLS)}) "
+                        f"VALUES ({', '.join('?' * (len(REP_COLS) + 1))})", [(eid, *r) for r in reps])
     if cursos is not None:
         con.execute("DELETE FROM escola_cursos WHERE escola_id=?", (eid,))
-        con.executemany(f"INSERT INTO escola_cursos (escola_id, {', '.join(CURSO_COLS)}) VALUES (?,?,?,?,?)",
-                        [(eid, *c) for c in cursos])
+        con.executemany(f"INSERT INTO escola_cursos (escola_id, {', '.join(CURSO_COLS)}) "
+                        f"VALUES ({', '.join('?' * (len(CURSO_COLS) + 1))})", [(eid, *c) for c in cursos])
 
 
 def _com_filhos(con, rows) -> list[dict]:
@@ -526,13 +629,16 @@ def _com_filhos(con, rows) -> list[dict]:
     escolas = [dict(r) for r in rows]
     reps, cursos = {}, {}
     for r in con.execute("SELECT * FROM representantes ORDER BY id"):
-        reps.setdefault(r["escola_id"], []).append({c: r[c] for c in REP_COLS})
+        rep = {c: r[c] or "" for c in REP_COLS}
+        rep["responsabilidade"] = _json(rep["responsabilidade"])
+        reps.setdefault(r["escola_id"], []).append(rep)
     for r in con.execute("SELECT * FROM escola_cursos ORDER BY id"):
-        cursos.setdefault(r["escola_id"], []).append({c: r[c] for c in CURSO_COLS})
+        cursos.setdefault(r["escola_id"], []).append({c: r[c] or "" for c in CURSO_COLS})
     for e in escolas:
         for k in ("gestor_nome", "gestor_cpf", "gestor_contato", "gestor_email"):  # migrados para representantes
             e.pop(k, None)
         e["representantes"], e["cursos"] = reps.get(e["id"], []), cursos.get(e["id"], [])
+        e["ficha"] = _json(e.get("ficha"))
     return escolas
 
 
@@ -566,8 +672,8 @@ def criar_escola(e: EscolaIn, u: dict = Depends(admin)):
 @app.put("/api/escolas/{eid}")
 def editar_escola(eid: int, e: EscolaIn, u: dict = Depends(admin)):
     con = db.connect()
-    _escola(con, eid)
-    vals, reps, cursos = _escola_vals(e), _representantes(e), _cursos(e)
+    atual = _escola(con, eid)
+    vals, reps, cursos = _escola_vals(e, atual), _representantes(e), _cursos(e)
     with con:
         con.execute(f"UPDATE escolas SET {', '.join(f'{c}=?' for c in ESCOLA_COLS)} WHERE id=?", (*vals, eid))
         _grava_filhos(con, eid, reps, cursos)
@@ -892,6 +998,24 @@ def baixar_lote(lid: int, u: dict = Depends(usuario)):
     r = _lote(con, lid, u)
     return Response(bytes(r["conteudo"]), media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{r["arquivo"]}"'})
+
+
+FICHAS = {"instituicao": ("FICHA_INSTITUICAO", fichas.ficha_instituicao), "cursos": ("RELACAO_CURSOS", fichas.ficha_cursos),
+          "representantes": ("FICHA_REPRESENTANTE", fichas.ficha_representantes)}
+
+
+@app.get("/api/escolas/{eid}/ficha/{tipo}")
+def ficha_smtt(eid: int, tipo: str, rep: int | None = None, u: dict = Depends(usuario)):
+    """Fichas da Central de Atendimento ao Estudante (SMTT) preenchidas com o cadastro da instituicao."""
+    if tipo not in FICHAS:
+        raise HTTPException(404)
+    con = db.connect()
+    e = _com_filhos(con, [_escola(con, eid, u)])[0]
+    prefixo, gerar = FICHAS[tipo]
+    conteudo = gerar(e, rep) if tipo == "representantes" else gerar(e)
+    cod = so_digitos(e["cod_smtt"] or "") or str(eid)
+    nome = f"{prefixo}_{cod}" + (f"_{rep + 1}" if rep is not None else "") + ".pdf"
+    return Response(conteudo, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
 
 @app.get("/api/lotes/{lid}/pdf")
