@@ -6,6 +6,7 @@ const fmtN = n => (n ?? 0).toLocaleString("pt-BR");
 const fmtPct = n => ((n || 0) * 100).toLocaleString("pt-BR", {maximumFractionDigits: 1}) + "%";
 const fmtBRL = n => (n || 0).toLocaleString("pt-BR", {style: "currency", currency: "BRL"});
 const fmtData = d => d ? d.slice(0, 10).split("-").reverse().join("/") : "";
+const fmtCNPJ = c => c && c.length === 14 ? `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}` : (c || "");
 const fmtCPF = c => c && c.length === 11 ? `${c.slice(0,3)}.${c.slice(3,6)}.${c.slice(6,9)}-${c.slice(9)}` : (c || "");
 const agora = () => new Date().toLocaleString("pt-BR");
 
@@ -15,7 +16,7 @@ async function api(url, opts = {}) {
   const r = await fetch(url, o);
   if (!r.ok) {
     let msg = r.statusText;
-    try { const j = await r.json(); msg = j.detail || msg; } catch {}
+    try { const j = await r.json(); msg = Array.isArray(j.detail) ? j.detail.map(d => `${(d.loc || []).slice(-1)[0] || ""}: ${d.msg}`).join("; ") : j.detail || msg; } catch {}
     if (!opts.semLogin && (r.status === 401 || (r.status === 403 && msg.startsWith("Acesso ")))) {
       mostrarLogin(url === "/api/sessao" ? "" : msg); throw new Error(msg);
     }
@@ -40,7 +41,7 @@ function mostrarLogin(msg = "") {
   SESSAO = null; ESCOLAS = [];
   const setup = !!PUBLICO.precisa_setup;
   $("#loginTitulo").textContent = setup ? "Primeiro acesso" : "Entrar";
-  $("#loginSub").textContent = setup ? "Crie o login e a senha do administrador do sistema." : "Acesse com o login da sua instituição.";
+  $("#loginSub").textContent = setup ? "Informe o CPF e crie a senha do administrador do sistema." : "Acesse com o seu CPF e a sua senha.";
   $("#loginConf").hidden = !setup; $("#loginConf input").required = setup;
   $("#loginBtn").textContent = setup ? "Criar administrador" : "Entrar";
   $("#loginMsg").textContent = msg; $("#loginMsg").hidden = !msg;
@@ -60,7 +61,7 @@ function entrar() {
   document.body.classList.toggle("inst", !ehAdmin());
   const nome = ehAdmin() ? "Administrador" : SESSAO.escola_nome;
   $("#userNome").textContent = nome; $("#userNome").title = nome;
-  $("#userPerfil").textContent = ehAdmin() ? `${SESSAO.login} · acesso total` : `Instituição · ${SESSAO.login}`;
+  $("#userPerfil").textContent = ehAdmin() ? `${fmtCPF(SESSAO.login)} · acesso total` : `Instituição · ${fmtCPF(SESSAO.login)}`;
   $("#userAv").textContent = iniciais(nome);
   $("#buscaInput").placeholder = ehAdmin() ? "Localizar estudante por nome ou CPF…" : "Localizar estudante da instituição…";
   const escs = SESSAO.escolas || [];
@@ -358,13 +359,13 @@ const CAMPOS_ALUNO = [
   ["Identificação"], ["aluno", "Nome do aluno", "text", "full"], ["cpf", "CPF", "cpf"], ["dt_nasc", "Data de nascimento", "date"],
   ["genero", "Sexo", "sexo"], ["telefone", "Telefone", "text"],
   ["Filiação"], ["mae", "Nome da mãe (nome e sobrenome)", "text", "full"], ["pai", "Nome do pai", "text", "full"],
-  ["Dados escolares"], ["ano_serie", "Série / ano", "text"], ["turno", "Turno", "turno"], ["turma", "Turma", "text"], ["matricula", "Matrícula", "text"],
+  ["Dados escolares"], ["curso", "Tipo de ensino", "curso"], ["grau", "Grau", "grau"], ["ano_serie", "Série / ano", "text"], ["turno", "Turno", "turno"], ["turma", "Turma", "text"], ["matricula", "Matrícula", "text"],
   ["Endereço"], ["rua", "Endereço (rua)", "text", "full"], ["numero", "Número", "text"], ["bairro", "Bairro", "text"],
   ["cidade", "Cidade", "text"], ["cep", "CEP", "text"],
   ["Documentos"], ["rg", "RG", "text"], ["org_exp", "Órgão expedidor", "text"], ["data_exp", "Data de expedição", "date"],
 ];
 // campo com problema, a partir das pendencias e dos codigos de critica
-const CRIT_CAMPO = {1: "aluno", 3: "genero", 6: "ano_serie", 7: "turno", 8: "matricula", 9: "dt_nasc", 10: "rua", 11: "bairro", 12: "cidade", 13: "pai"};
+const CRIT_CAMPO = {1: "aluno", 3: "genero", 4: "curso", 5: "grau", 6: "ano_serie", 7: "turno", 8: "matricula", 9: "dt_nasc", 10: "rua", 11: "bairro", 12: "cidade", 13: "pai"};
 function camposComErro(a) {
   if (!a) return new Set();
   const s = new Set((a.criticas || []).map(c => CRIT_CAMPO[c]).filter(Boolean));
@@ -372,6 +373,7 @@ function camposComErro(a) {
   if (a.pendencias.some(p => ["sem_mae", "mae_incompleta"].includes(p))) s.add("mae");
   return s;
 }
+const TIPOS_ENSINO = ["ENSINO FUNDAMENTAL", "ENSINO MEDIO", "EDUCACAO INFANTIL", "EJA"];
 function formAluno(vals, base, erros, extra = "") {
   const ph = k => base[k] ? `base: ${k === "cpf" ? fmtCPF(base[k]) : k.includes("dt") ? fmtData(base[k]) : base[k]}` : "";
   const sel = (k, ops) => `<select name="${k}"><option value="">${esc(ph(k) || "—")}</option>${ops.map(([v, l]) => `<option value="${v}" ${(vals[k] || "").toUpperCase().startsWith(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
@@ -379,6 +381,8 @@ function formAluno(vals, base, erros, extra = "") {
     `<div class="${cls || ""} ${erros.has(k) ? "campo-err" : ""}"><label>${l}</label>${
       t === "sexo" ? sel(k, [["M", "Masculino"], ["F", "Feminino"]]) :
       t === "turno" ? sel(k, [["M", "Matutino"], ["V", "Vespertino"], ["N", "Noturno"], ["I", "Integral"]]) :
+      t === "grau" ? sel(k, [["1", "1"], ["2", "2"], ["3", "3"]]) :
+      t === "curso" ? sel(k, TIPOS_ENSINO.map(v => [v, v])) :
       `<input name="${k}" type="${t === "date" ? "date" : "text"}" value="${esc(t === "cpf" ? fmtCPF(vals[k] || "") : vals[k] || "")}" placeholder="${esc(ph(k))}">`}</div>`).join("") + extra;
 }
 // depois de salvar: recarrega a lista (reprocessa pendencias e criticas) e reabre o aluno
@@ -393,7 +397,7 @@ async function reprocessar(id) {
 async function novoAluno(eid) {
   drawer(`<div class="dh"><div style="flex:1"><h2>Cadastrar aluno</h2><div class="muted">Cadastro individual, fora da base GEDUC</div></div>
       <button onclick="closeDrawer()">Fechar</button></div>
-    <div class="db"><form id="fNovo" class="form">${formAluno({cidade: "SAO LUIS"}, {}, new Set())}
+    <div class="db"><form id="fNovo" class="form">${formAluno({cidade: "SAO LUIS", curso: "ENSINO FUNDAMENTAL", grau: "1"}, {}, new Set())}
       <div class="full row"><button class="primary">Cadastrar e processar</button></div></form></div>`);
   $("#fNovo [name=aluno]").required = true;
   $("#fNovo").onsubmit = async ev => {
@@ -537,10 +541,17 @@ async function editarEscola(id) {
       <div class="full"><label>Nome da instituição</label><input name="nome" required value="${esc(e.nome)}"></div>
       <div><label>Código SMTT (4 dígitos)</label><input name="cod_smtt" value="${esc(e.cod_smtt)}" maxlength="4"></div>
       <div><label>Código INEP</label><input name="inep" value="${esc(e.inep)}"></div>
+      <div><label>CNPJ</label><input name="cnpj" value="${esc(fmtCNPJ(e.cnpj))}" inputmode="numeric" placeholder="00.000.000/0000-00"></div>
+      <div><label>E-mail</label><input name="email" type="email" value="${esc(e.email || "")}"></div>
       <div class="full"><label>Vínculo com o GEDUC (nome da instituição na base GEDUC)</label>
         <select name="geduc_nome"><option value="">Usar o mesmo nome do cadastro</option>${sug.slice(0, 400).map(s =>
           `<option value="${esc(s.escola)}" ${s.escola.trim() === (e.geduc_nome || "").trim() ? "selected" : ""}>${esc(s.escola)} — ${fmtN(s.alunos)} alunos${s.similaridade != null ? ` (${Math.round(s.similaridade * 100)}%)` : ""}</option>`).join("")}</select>
         <small class="muted">Ordenado por semelhança com o nome. Também cruza pelo INEP, se informado.</small></div>
+      <h3 class="full" style="margin:8px 0 0">Informações do(a) gestor(a)</h3>
+      <div class="full"><label>Nome</label><input name="gestor_nome" value="${esc(e.gestor_nome || "")}"></div>
+      <div><label>CPF</label><input name="gestor_cpf" value="${esc(fmtCPF(e.gestor_cpf || ""))}" inputmode="numeric"></div>
+      <div><label>Contato</label><input name="gestor_contato" value="${esc(e.gestor_contato || "")}" placeholder="(98) 90000-0000"></div>
+      <div class="full"><label>E-mail do(a) gestor(a)</label><input name="gestor_email" type="email" value="${esc(e.gestor_email || "")}"></div>
     </div>
     <div class="mf">${id ? `<button type="button" class="danger" id="delEsc">Excluir</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
   $("#fEsc").onsubmit = async ev => {
@@ -731,8 +742,8 @@ async function bases() {
     </div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));margin-bottom:16px">
       ${Object.entries(d.bases).map(([k, b]) => `<div class="card"><div class="card-h"><h2>${esc(b.label)}</h2><span class="spacer"></span><span class="badge b-mute">${fmtN(b.linhas)} linhas</span></div>
-        <div class="card-b"><p class="muted" style="margin-top:0">Aba/arquivo: <b>${esc(b.aba)}</b> (.xlsx, .xlsm ou .csv)</p>
-        <div class="drop" data-base="${k}"><svg class="i"><use href="#i-upload"/></svg>Arraste ou <label style="display:inline;color:var(--accent);cursor:pointer">escolha o arquivo<input type="file" accept=".xlsx,.xlsm,.csv" hidden></label></div></div></div>`).join("")}
+        <div class="card-b"><p class="muted" style="margin-top:0">Aba/arquivo: <b>${esc(b.aba)}</b> (.xlsx, .xlsm, .xls ou .csv)</p>
+        <div class="drop" data-base="${k}"><svg class="i"><use href="#i-upload"/></svg>Arraste ou <label style="display:inline;color:var(--accent);cursor:pointer">escolha o arquivo<input type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden></label></div></div></div>`).join("")}
     </div>
     <div id="impStatus"></div>
     <div class="card"><div class="card-h"><h2>Histórico de importações</h2></div>
@@ -813,16 +824,16 @@ async function usuarios() {
   const [us] = [await api("/api/usuarios"), await loadEscolas()];
   const nomes = Object.fromEntries(ESCOLAS.map(e => [e.id, e.nome]));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${us.length} usuário(s)</h2><span class="spacer"></span>
-      <input id="fU" placeholder="Filtrar login ou instituição…" style="width:260px"><button class="primary" id="novoU">Novo usuário</button></div>
-    <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Login</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
+      <input id="fU" placeholder="Filtrar CPF ou instituição…" style="width:260px"><button class="primary" id="novoU">Novo usuário</button></div>
+    <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Usuário (CPF)</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
     <tbody id="tbUBody"></tbody></table></div><div id="pgU"></div></div>`;
-  const rowU = x => `<tr><td class="mono"><b>${esc(x.login)}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
+  const rowU = x => `<tr><td class="mono"><b>${esc(fmtCPF(x.login))}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
       <td>${x.perfil === "admin" ? `<span class="badge b-info">Administrador</span>` : `<span class="badge b-mute">Instituição</span>`}</td>
       <td>${x.perfil === "admin" ? `<span class="muted">todas</span>` : x.escolas.map(id => `<div>${esc(nomes[id] || "#" + id)}${ESCOLAS.find(e => e.id === id)?.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</div>`).join("")}</td>
       <td>${esc(x.criado_em)}</td><td><button class="btn-sm" data-u="${x.id}">Editar</button></td></tr>`;
   const renderU = () => {
-    const q = $("#fU").value.toLowerCase();
-    const pg = paginar("usuarios", us.filter(x => x.login.includes(q) || x.escolas.some(id => (nomes[id] || "").toLowerCase().includes(q))), renderU);
+    const q = $("#fU").value.toLowerCase(), qd = q.replace(/\D/g, "");
+    const pg = paginar("usuarios", us.filter(x => x.login.includes(q) || (qd && x.login.includes(qd)) || x.escolas.some(id => (nomes[id] || "").toLowerCase().includes(q))), renderU);
     $("#tbUBody").innerHTML = pg.itens.map(rowU).join("") || `<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>`;
     $("#pgU").innerHTML = pg.html;
   };
@@ -836,7 +847,7 @@ function editarUsuario(x) {
   const proprio = x.login === SESSAO.login;
   modal(`<div class="mh"><h2>${novo ? "Novo usuário" : "Editar usuário"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
     <form id="fUsr"><div class="mb form">
-      <div><label>Login</label><input name="login" required value="${esc(x.login)}" autocomplete="off"></div>
+      <div><label>Usuário (CPF)</label><input name="login" required value="${esc(fmtCPF(x.login))}" autocomplete="off" inputmode="numeric" placeholder="Somente números"></div>
       <div><label>${novo ? "Senha (mín. 6 caracteres)" : "Nova senha (vazio = manter a atual)"}</label><input name="senha" type="password" ${novo ? "required" : ""} minlength="6" autocomplete="new-password"></div>
       <div class="full"><label>Perfil</label><select name="perfil" ${proprio ? "disabled" : ""}>
         <option value="instituicao" ${x.perfil === "instituicao" ? "selected" : ""}>Instituição: acessa só as instituições vinculadas, sem cadastrar instituições nem gerar orçamentos</option>
@@ -860,7 +871,7 @@ function editarUsuario(x) {
     closeModal(); toast("Usuário salvo"); usuarios();
   };
   const del = $("#delU");
-  if (del) del.onclick = async () => { if (confirm(`Excluir o usuário ${x.login}?`)) { await api(`/api/usuarios/${x.id}`, {method: "DELETE"}); closeModal(); toast("Usuário excluído"); usuarios(); } };
+  if (del) del.onclick = async () => { if (confirm(`Excluir o usuário ${fmtCPF(x.login)}?`)) { await api(`/api/usuarios/${x.id}`, {method: "DELETE"}); closeModal(); toast("Usuário excluído"); usuarios(); } };
 }
 
 async function boot() {

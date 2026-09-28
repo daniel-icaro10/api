@@ -1,7 +1,9 @@
 """Importacao das bases (planilha SIS SMPE completa ou arquivos avulsos .xlsx/.xlsm/.csv)."""
 import csv
 import io
+import re
 import warnings
+from html.parser import HTMLParser
 from pathlib import Path
 
 import openpyxl
@@ -11,7 +13,7 @@ from .util import norm_cpf, norm_nome, sem_acento, to_date, txt
 
 warnings.filterwarnings("ignore", module="openpyxl")
 
-# base -> (aba padrao na planilha, coluna obrigatoria, {coluna_db: [cabecalhos aceitos]})
+# base -> (aba padrao na planilha, coluna(s) obrigatoria(s), {coluna_db: [cabecalhos aceitos]})
 BASES = {
     "escolas": ("CAD_ESCOLA", "ESCOLA", {
         "id": ["ID.:", "ID"], "nome": ["ESCOLA"], "cod_smtt": ["COD_SMTT", "COD SMTT"],
@@ -34,12 +36,15 @@ BASES = {
         "endereco": ["ENDERECO"], "complemento": ["COMPLEMENTO"], "numero": ["NUMERO"], "bairro": ["BAIRRO"],
         "cidade": ["CIDADE"], "uf": ["UF"], "mae": ["MAE"], "pai": ["PAI"], "cadastrado": ["CADASTRADO"],
         "alterado": ["ALTERDADO", "ALTERADO"], "curso": ["CURSO"], "tipo": ["TIPO"], "modalidade": ["MODALIDADE"]}),
-    "status_alunos": (" ALUNOS_POR_STATUS", "ALUNO", {
+    "status_alunos": (" ALUNOS_POR_STATUS", ["ALUNO", "NOME_ALUNO", "NOME DO ALUNO"], {
         "escola": ["ESCOLA"], "turma": ["TURMA"], "turno": ["TURNO"], "id_aluno": ["ID_ALUNO"],
-        "inep_aluno": ["INEP_ALUNO"], "aluno": ["ALUNO"], "matricula": ["MATRICULA"], "nascimento": ["NASCIMENTO"],
+        "inep_aluno": ["INEP_ALUNO"], "aluno": ["ALUNO", "NOME_ALUNO", "NOME DO ALUNO"], "matricula": ["MATRICULA"],
+        "nascimento": ["NASCIMENTO", "DT_NASCIMENTO", "DATA DE NASCIMENTO", "DATA_NASCIMENTO"],
         "idade": ["IDADE"], "sexo": ["SEXO"], "cor": ["COR"], "nis": ["NIS"], "situacao": ["SITUACAO"],
-        "mae": ["NOME_MAE"], "pai": ["NOME_PAI"], "endereco": ["ENDERECO_ALUNO"], "numero": ["NUMERO"],
-        "bairro": ["BAIRRO"], "certidao": ["CERTIDAO_NASCIMENTO"], "cpf": ["CPF_ALUNO"], "telefone": ["TELEFONE"]}),
+        "mae": ["NOME_MAE", "NOME DA MAE", "MAE"], "pai": ["NOME_PAI", "NOME DO PAI", "PAI"],
+        "endereco": ["ENDERECO_ALUNO", "ENDERECO"], "numero": ["NUMERO"], "bairro": ["BAIRRO"],
+        "certidao": ["CERTIDAO_NASCIMENTO", "CERTIDAO"], "cpf": ["CPF_ALUNO", "CPF"],
+        "telefone": ["TELEFONE", "TELEFONE_ALUNO", "CELULAR", "FONE"]}),
 }
 DATE_COLS = {"dt_nasc", "nascido", "data_exp", "nascimento"}
 CPF_COLS = {"cpf"}
@@ -49,14 +54,25 @@ LABELS = {"escolas": "Cadastro de instituições", "geduc": "GEDUC", "censo": "C
 
 
 def _h(v) -> str:
-    return sem_acento(txt(v)).upper().strip()
+    """Cabecalho normalizado: sem acento, maiusculo, '_' igual a espaco (ex.: 'Nome_Mãe' = 'NOME MAE')."""
+    return re.sub(r"\s+", " ", sem_acento(txt(v)).upper().replace("_", " ")).strip()
 
 
-def _find_header(rows: list[tuple], obrigatoria: str) -> int:
-    for i, r in enumerate(rows[:15]):
-        if obrigatoria in {_h(c) for c in r}:
+def _obrigatorias(base: str) -> set[str]:
+    o = BASES[base][1]
+    return {_h(x) for x in ([o] if isinstance(o, str) else o)}
+
+
+LINHAS_CABECALHO = 50  # exportacoes do GEDUC trazem titulo, filtros e totais antes do cabecalho
+
+
+def _find_header(rows: list[tuple], base: str) -> int:
+    obrig = _obrigatorias(base)
+    for i, r in enumerate(rows[:LINHAS_CABECALHO]):
+        if obrig & {_h(c) for c in r}:
             return i
-    raise ValueError(f"Cabecalho nao encontrado (coluna '{obrigatoria}')")
+    raise ValueError(f"Cabeçalho não encontrado: a planilha precisa ter a coluna {' ou '.join(sorted(obrig))} "
+                     f"nas primeiras {LINHAS_CABECALHO} linhas")
 
 
 def _map_columns(header: tuple, cols: dict) -> dict[str, int]:
@@ -64,8 +80,8 @@ def _map_columns(header: tuple, cols: dict) -> dict[str, int]:
     out = {}
     for col, aliases in cols.items():
         for a in aliases:
-            if a in hn:
-                out[col] = hn.index(a)
+            if _h(a) in hn:
+                out[col] = hn.index(_h(a))
                 break
     return out
 
@@ -75,17 +91,18 @@ def _clean(base: str, col: str, v):
         return to_date(v)
     if col in CPF_COLS:
         return norm_cpf(v)
-    return txt(v)
+    return txt(v).replace("\x00", "")  # o Postgres recusa texto com caractere nulo
 
 
 def _rows_to_records(base: str, rows_iter) -> list[dict]:
-    _, obrig, cols = BASES[base]
+    cols = BASES[base][2]
+    rows_iter = iter(rows_iter)
     head = []
     for r in rows_iter:
         head.append(r)
-        if len(head) >= 15:
+        if len(head) >= LINHAS_CABECALHO:
             break
-    hi = _find_header(head, obrig)
+    hi = _find_header(head, base)
     cmap = _map_columns(head[hi], cols)
     nome_idx = cmap.get(NOME_COL.get(base, "nome"))
     recs = []
@@ -103,32 +120,114 @@ def _rows_to_records(base: str, rows_iter) -> list[dict]:
         x = conv(r)
         if x:
             recs.append(x)
+    if not recs:  # evita apagar a base atual com um arquivo vazio ou errado
+        raise ValueError(f"Nenhum registro encontrado abaixo do cabeçalho (linha {hi + 1})")
     return recs
 
 
+def _csv_rows(data: bytes) -> list[list]:
+    text = data.decode("utf-8-sig", errors="replace")
+    if text.count("\ufffd") > 5:
+        text = data.decode("cp1252", errors="replace")
+    amostra = text[:100000]
+    sep = max(";,\t", key=amostra.count)  # separador mais frequente (as linhas de titulo nao tem nenhum)
+    return list(csv.reader(io.StringIO(text), delimiter=sep))
+
+
+class _Tabela(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.rows, self.row, self.cell = [], None, None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self.row = []
+        elif tag in ("td", "th") and self.row is not None:
+            self.cell = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self.cell is not None:
+            self.row.append(" ".join("".join(self.cell).split()))
+            self.cell = None
+        elif tag == "tr" and self.row is not None:
+            self.rows.append(tuple(self.row))
+            self.row = None
+
+    def handle_data(self, d):
+        if self.cell is not None:
+            self.cell.append(d)
+
+
+def _html_rows(data: bytes) -> list[tuple]:
+    """'.xls' que na verdade e uma tabela HTML (exportacao comum de sistemas web como o GEDUC)."""
+    text = data.decode("utf-8", errors="replace")
+    if text.count("\ufffd") > 5:
+        text = data.decode("cp1252", errors="replace")
+    p = _Tabela()
+    p.feed(text)
+    return p.rows
+
+
+def _xls_sheets(data: bytes) -> list[tuple[str, list]]:
+    """Excel 97-2003 (.xls)."""
+    import xlrd
+
+    wb = xlrd.open_workbook(file_contents=data)
+    out = []
+    for sh in wb.sheets():
+        rows = []
+        for i in range(sh.nrows):
+            row = []
+            for c in sh.row(i):
+                v = c.value
+                if c.ctype == xlrd.XL_CELL_DATE:
+                    try:
+                        v = xlrd.xldate.xldate_as_datetime(v, wb.datemode)
+                    except (ValueError, OverflowError):
+                        pass
+                row.append(v)
+            rows.append(tuple(row))
+        out.append((sh.name, rows))
+    return out
+
+
+def _sheets(filename: str, data: bytes) -> list[tuple[str, list]]:
+    """(aba, linhas) de arquivos que nao sao xlsx; o formato e identificado pelo conteudo, nao so pela extensao."""
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # xls antigo
+        return _xls_sheets(data)
+    if b"<table" in data[:200000].lower():
+        return [(Path(filename).stem, _html_rows(data))]
+    if b"\x00" not in data[:1000]:
+        return [(Path(filename).stem, _csv_rows(data))]
+    raise ValueError("Formato de arquivo não reconhecido. Envie .xlsx, .xlsm, .xls ou .csv")
+
+
 def read_file(base: str, filename: str, data: bytes, sheet: str | None = None) -> list[dict]:
-    ext = Path(filename).suffix.lower()
-    if ext == ".csv":
-        text = data.decode("utf-8-sig", errors="replace")
-        if text.count("�") > 5:
-            text = data.decode("cp1252")
-        dialect = csv.Sniffer().sniff(text[:5000], delimiters=";,\t")
-        return _rows_to_records(base, iter(list(csv.reader(io.StringIO(text), dialect))))
-    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    """Base de um arquivo avulso: a aba com o nome padrao, se houver, ou a primeira aba que tenha o cabecalho."""
+    alvo = _h(sheet or BASES[base][0])
+    wb = None
+    if data[:2] == b"PK":  # xlsx / xlsm: aba a aba, sem carregar o arquivo todo na memoria
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        abas = [(ws.title, ws) for ws in wb.worksheets]
+    else:
+        abas = _sheets(filename, data)
+    abas.sort(key=lambda a: _h(a[0]) != alvo)
+    erro = None
     try:
-        aba = sheet or BASES[base][0]
-        ws = wb[aba] if aba in wb.sheetnames else _guess_sheet(wb, base)
-        return _rows_to_records(base, ws.iter_rows(values_only=True))
+        for _, rows in abas:
+            try:
+                return _rows_to_records(base, rows.iter_rows(values_only=True) if wb else rows)
+            except ValueError as ex:
+                erro = erro or ex
     finally:
-        wb.close()
+        if wb:
+            wb.close()
+    raise erro or ValueError("Arquivo sem abas")
 
 
-def _guess_sheet(wb, base):
-    alvo = BASES[base][0].strip().upper()
-    for n in wb.sheetnames:
-        if n.strip().upper() == alvo:
-            return wb[n]
-    return wb.worksheets[0]  # arquivo avulso com uma aba so
+def _aba(wb, base: str):
+    alvo = _h(BASES[base][0])
+    return next((wb[n] for n in wb.sheetnames if _h(n) == alvo), None)
 
 
 def save(con, base: str, recs: list[dict], arquivo: str) -> int:
@@ -161,11 +260,15 @@ def import_workbook(path: str, bases: list[str] | None = None, log=print) -> dic
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     out = {}
     for base in bases or list(BASES):
-        aba = BASES[base][0]
-        if aba not in wb.sheetnames:
-            log(f"{base}: aba '{aba}' nao encontrada, pulando")
+        ws = _aba(wb, base)
+        if ws is None:
+            log(f"{LABELS[base]}: aba '{BASES[base][0].strip()}' não encontrada, pulando")
             continue
-        recs = _rows_to_records(base, wb[aba].iter_rows(values_only=True))
+        try:
+            recs = _rows_to_records(base, ws.iter_rows(values_only=True))
+        except ValueError as ex:  # aba vazia ou sem cabecalho: mantem a base atual e segue com as outras
+            log(f"{LABELS[base]}: {ex}, base mantida")
+            continue
         out[base] = save(con, base, recs, Path(path).name)
         log(f"{LABELS[base]}: {out[base]} linhas")
     wb.close()

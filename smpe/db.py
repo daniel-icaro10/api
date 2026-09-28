@@ -146,7 +146,10 @@ COLUNAS_NOVAS = [("lotes", "num_remessa", "INTEGER"), ("escolas", "bloqueado", "
                  ("escolas", "motivo_bloqueio", "TEXT DEFAULT ''"), ("geduc", "telefone", "TEXT"),
                  ("sessoes", "escola_id", "INTEGER")] + [
     ("ajustes", c, "TEXT") for c in ("aluno", "pai", "genero", "dt_nasc", "ano_serie", "turno", "turma", "matricula",
-                                     "rua", "numero", "bairro", "cidade", "cep")]
+                                     "rua", "numero", "bairro", "cidade", "cep", "grau", "curso")] + [
+    ("alunos_manuais", c, "TEXT") for c in ("grau", "curso")] + [
+    ("escolas", c, "TEXT DEFAULT ''") for c in ("cnpj", "email", "gestor_nome", "gestor_cpf", "gestor_contato",
+                                                "gestor_email")]
 
 
 

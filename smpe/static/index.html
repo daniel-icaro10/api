@@ -31,9 +31,9 @@
   <form class="login-card" id="loginForm">
     <img class="logo-img" src="/api/logo" alt="SIS SMPE - Migração de estudantes SMTT">
     <h1 id="loginTitulo">Entrar</h1>
-    <p class="muted" id="loginSub">Acesse com o login da sua instituição.</p>
+    <p class="muted" id="loginSub">Acesse com o seu CPF e a sua senha.</p>
     <div class="alert warn" id="loginMsg" hidden></div>
-    <div><label>Login</label><input name="login" autocomplete="username" required></div>
+    <div><label>Usuário (CPF)</label><input name="login" autocomplete="username" inputmode="numeric" placeholder="Somente números" required></div>
     <div><label>Senha</label><input name="senha" type="password" autocomplete="current-password" required></div>
     <div id="loginConf" hidden><label>Confirme a senha</label><input name="senha2" type="password" autocomplete="new-password"></div>
     <button class="primary" id="loginBtn">Entrar</button>

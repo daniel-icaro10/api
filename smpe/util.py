@@ -1,7 +1,7 @@
 """Normalizacoes usadas no cruzamento das bases."""
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 
 def sem_acento(s: str) -> str:
@@ -65,14 +65,23 @@ def to_date(v) -> str:
         return v.date().isoformat()
     if isinstance(v, date):
         return v.isoformat()
+    if isinstance(v, (int, float)) and 1 <= v < 100000:  # numero de serie do Excel (celula sem formato de data)
+        return (date(1899, 12, 30) + timedelta(days=int(v))).isoformat()
     s = str(v).strip()
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
+    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
     if m:
-        return s[:10]
-    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})", s)
+        return _iso(m[1], m[2], m[3])
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})", s)
     if m:
-        return f"{m[3]}-{int(m[2]):02d}-{int(m[1]):02d}"
+        return _iso(m[3], m[2], m[1])
     return ""
+
+
+def _iso(a, m, d) -> str:
+    try:
+        return date(int(a), int(m), int(d)).isoformat()
+    except ValueError:
+        return ""
 
 
 _MOJIBAKE = re.compile(r"[ÃÂ][\x80-\xbfŒœŠšŸŽžƒˆ˜–-™]")

@@ -3,6 +3,7 @@ import difflib
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import threading
 import time
@@ -14,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import critica, db, importer, logic, pdf
-from .util import norm_cpf, norm_nome, so_digitos
+from .util import cpf_valido, norm_cpf, norm_nome, so_digitos
 
 app = FastAPI(title="SIS SMPE")
 STATIC = Path(__file__).parent / "static"
@@ -54,6 +55,12 @@ def _confere(senha: str, guardado: str) -> bool:
     except ValueError:
         return False
     return hmac.compare_digest(_hash(senha, salt), guardado)
+
+
+def _norm_login(login: str) -> str:
+    """O usuario e o CPF, guardado so com os digitos; aceita digitado com ponto e traco."""
+    login = login.strip().lower()
+    return so_digitos(login) if re.fullmatch(r"[\d.\-\s]+", login) else login
 
 
 def _valida_senha(senha: str):
@@ -156,7 +163,8 @@ def _abre_sessao(con, request: Request, response: Response, uid: int, escola_id:
         con.execute("INSERT INTO sessoes (token, usuario_id, expira, escola_id) VALUES (?,?,?,?)",
                     (token, uid, time.time() + SESSAO_HORAS * 3600, escola_id))
     https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    response.set_cookie(COOKIE, token, max_age=SESSAO_HORAS * 3600, httponly=True, samesite="lax", secure=https)
+    # sem max_age: cookie de sessao, apagado ao fechar o navegador (o servidor ainda expira em SESSAO_HORAS)
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=https)
 
 
 @app.post("/api/setup")
@@ -165,9 +173,9 @@ def setup(d: LoginIn, request: Request, response: Response):
     con = db.connect()
     if con.execute("SELECT 1 FROM usuarios LIMIT 1").fetchone():
         raise HTTPException(400, "O administrador já foi criado")
-    login = d.login.strip().lower()
-    if not login:
-        raise HTTPException(400, "Informe o login")
+    login = _norm_login(d.login)
+    if not cpf_valido(login):
+        raise HTTPException(400, "O usuário deve ser um CPF válido (11 dígitos)")
     _valida_senha(d.senha)
     with con:
         uid = con.execute("INSERT INTO usuarios (login, senha_hash, perfil) VALUES (?,?,'admin') RETURNING id",
@@ -179,7 +187,7 @@ def setup(d: LoginIn, request: Request, response: Response):
 @app.post("/api/login")
 def login(d: LoginIn, request: Request, response: Response):
     con = db.connect()
-    r = con.execute("SELECT * FROM usuarios WHERE login=?", (d.login.strip().lower(),)).fetchone()
+    r = con.execute("SELECT * FROM usuarios WHERE login=?", (_norm_login(d.login),)).fetchone()
     if not r or not _confere(d.senha, r["senha_hash"]):
         raise HTTPException(401, "Login ou senha inválidos")
     esc = {} if r["perfil"] == "admin" else _escopo(_instituicoes(con, r["id"]), None)
@@ -236,14 +244,15 @@ def _usuarios(con) -> list[dict]:
 
 
 def _valida_usuario(con, d: UsuarioIn, uid: int | None) -> str:
-    login = d.login.strip().lower()
-    if not login:
-        raise HTTPException(400, "Informe o login")
+    login = _norm_login(d.login)
+    atual = con.execute("SELECT login FROM usuarios WHERE id=?", (uid,)).fetchone() if uid else None
+    if not (atual and atual["login"] == login) and not cpf_valido(login):  # logins antigos continuam valendo
+        raise HTTPException(400, "O usuário deve ser um CPF válido (11 dígitos)")
     if d.perfil not in ("admin", "instituicao"):
         raise HTTPException(400, "Perfil inválido")
     outro = con.execute("SELECT id FROM usuarios WHERE login=?", (login,)).fetchone()
     if outro and outro["id"] != uid:
-        raise HTTPException(400, f"O login '{login}' já está em uso")
+        raise HTTPException(400, f"Já existe usuário com o CPF {login}")
     if d.senha or uid is None:
         _valida_senha(d.senha)
     if d.perfil == "instituicao":
@@ -364,6 +373,33 @@ class EscolaIn(BaseModel):
     matriculados_info: int | None = None
     peticionamento: float = 0
     desconto: float = 0
+    cnpj: str | None = ""
+    email: str | None = ""
+    gestor_nome: str | None = ""
+    gestor_cpf: str | None = ""
+    gestor_contato: str | None = ""
+    gestor_email: str | None = ""
+
+
+ESCOLA_COLS = ("nome", "cod_smtt", "inep", "geduc_nome", "nivel", "matriculados_info", "peticionamento", "desconto",
+               "cnpj", "email", "gestor_nome", "gestor_cpf", "gestor_contato", "gestor_email")
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def _escola_vals(e: EscolaIn) -> list:
+    d = {k: (v or "").strip() if k in ESCOLA_COLS[8:] or isinstance(v, str) else v for k, v in e.model_dump().items()}
+    if not d["nome"]:
+        raise HTTPException(400, "Informe o nome da instituição")
+    d["cnpj"], d["gestor_cpf"] = so_digitos(d["cnpj"]), so_digitos(d["gestor_cpf"])
+    d["gestor_nome"] = d["gestor_nome"].upper()
+    if d["cnpj"] and len(d["cnpj"]) != 14:
+        raise HTTPException(400, "CNPJ deve ter 14 dígitos")
+    if d["gestor_cpf"] and not cpf_valido(d["gestor_cpf"]):
+        raise HTTPException(400, "CPF do(a) gestor(a) inválido")
+    for k, nome in (("email", "E-mail da instituição"), ("gestor_email", "E-mail do(a) gestor(a)")):
+        if d[k] and not EMAIL_RE.fullmatch(d[k]):
+            raise HTTPException(400, f"{nome} inválido")
+    return [d[c] for c in ESCOLA_COLS]
 
 
 @app.get("/api/escolas")
@@ -384,11 +420,10 @@ def criar_escola(e: EscolaIn, u: dict = Depends(admin)):
     eid = e.id or (con.execute("SELECT COALESCE(MAX(id),0)+1 FROM escolas").fetchone()[0])
     if con.execute("SELECT 1 FROM escolas WHERE id=?", (eid,)).fetchone():
         raise HTTPException(400, f"Já existe instituição com ID {eid}")
+    vals = _escola_vals(e)
     with con:
-        con.execute("""INSERT INTO escolas (id, nome, cod_smtt, inep, geduc_nome, nivel, matriculados_info,
-                       peticionamento, desconto) VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (eid, e.nome.strip(), e.cod_smtt.strip(), e.inep.strip(), e.geduc_nome.strip(), e.nivel,
-                     e.matriculados_info, e.peticionamento, e.desconto))
+        con.execute(f"""INSERT INTO escolas (id, {', '.join(ESCOLA_COLS)})
+                        VALUES ({', '.join('?' * (len(ESCOLA_COLS) + 1))})""", (eid, *vals))
     return {"id": eid}
 
 
@@ -396,11 +431,9 @@ def criar_escola(e: EscolaIn, u: dict = Depends(admin)):
 def editar_escola(eid: int, e: EscolaIn, u: dict = Depends(admin)):
     con = db.connect()
     _escola(con, eid)
+    vals = _escola_vals(e)
     with con:
-        con.execute("""UPDATE escolas SET nome=?, cod_smtt=?, inep=?, geduc_nome=?, nivel=?, matriculados_info=?,
-                       peticionamento=?, desconto=? WHERE id=?""",
-                    (e.nome.strip(), e.cod_smtt.strip(), e.inep.strip(), e.geduc_nome.strip(), e.nivel,
-                     e.matriculados_info, e.peticionamento, e.desconto, eid))
+        con.execute(f"UPDATE escolas SET {', '.join(f'{c}=?' for c in ESCOLA_COLS)} WHERE id=?", (*vals, eid))
     return {"ok": True}
 
 
@@ -475,10 +508,17 @@ class AjusteIn(BaseModel):
     bairro: str = ""
     cidade: str = ""
     cep: str = ""
+    grau: str = ""
+    curso: str = ""
 
 
 AJ_COLS = ("cpf", "mae", "rg", "org_exp", "data_exp", "telefone", "obs") + logic.CAMPOS_AJUSTE
-AJ_MAIUSC = {"mae", "org_exp", "aluno", "pai", "genero", "turno", "turma", "rua", "bairro", "cidade"}
+AJ_MAIUSC = {"mae", "org_exp", "aluno", "pai", "genero", "turno", "turma", "rua", "bairro", "cidade", "curso"}
+
+
+def _valida_grau(grau: str):
+    if (grau or "").strip() not in ("", "1", "2", "3"):
+        raise HTTPException(400, "Grau deve ser 1, 2 ou 3")
 
 
 @app.put("/api/alunos/{id_aluno}/ajuste")
@@ -494,6 +534,7 @@ def ajustar(id_aluno: str, a: AjusteIn, u: dict = Depends(usuario)):
     cpf = norm_cpf(a.cpf)
     if a.cpf and len(cpf) != 11:
         raise HTTPException(400, "CPF deve ter 11 dígitos")
+    _valida_grau(a.grau)
     d = a.model_dump()
     d["cpf"], d["cep"] = cpf, so_digitos(a.cep)
     vals = [(d[c] or "").strip().upper() if c in AJ_MAIUSC else (d[c] or "").strip() for c in AJ_COLS]
@@ -527,10 +568,12 @@ class AlunoIn(BaseModel):
     rg: str = ""
     org_exp: str = ""
     data_exp: str = ""
+    grau: str = "1"
+    curso: str = "ENSINO FUNDAMENTAL"
 
 
 MANUAL_COLS = list(AlunoIn.model_fields)
-MANUAL_MAIUSC = {"aluno", "mae", "pai", "genero", "turno", "turma", "rua", "bairro", "cidade", "org_exp"}
+MANUAL_MAIUSC = {"aluno", "mae", "pai", "genero", "turno", "turma", "rua", "bairro", "cidade", "org_exp", "curso"}
 
 
 def _manual_vals(a: AlunoIn) -> list:
@@ -540,6 +583,7 @@ def _manual_vals(a: AlunoIn) -> list:
     d["cpf"], d["cep"] = norm_cpf(d["cpf"]), so_digitos(d["cep"])
     if a.cpf and len(d["cpf"]) != 11:
         raise HTTPException(400, "CPF deve ter 11 dígitos")
+    _valida_grau(a.grau)
     vals = [(d[c] or "").strip().upper() if c in MANUAL_MAIUSC else (d[c] or "").strip() for c in MANUAL_COLS]
     return vals + [norm_nome(d["aluno"])]
 
@@ -596,14 +640,13 @@ def busca(q: str, u: dict = Depends(usuario)):
         return []
     cpf = norm_cpf(q)
     por_cpf = len(cpf) == 11 and q.replace(".", "").replace("-", "").isdigit()
-    if por_cpf:
-        rows = con.execute("SELECT * FROM geduc WHERE cpf=? LIMIT 1000", (cpf,))
-        manuais = con.execute("SELECT * FROM alunos_manuais WHERE cpf=?", (cpf,))
-    else:
-        rows = con.execute("SELECT * FROM geduc WHERE nome_norm LIKE ? ORDER BY aluno LIMIT 1000",
-                           (f"%{norm_nome(q)}%",))
-        manuais = con.execute("SELECT * FROM alunos_manuais WHERE nome_norm LIKE ? ORDER BY aluno",
-                              (f"%{norm_nome(q)}%",))
+    cond, arg = ("cpf=?", cpf) if por_cpf else ("nome_norm LIKE ?", f"%{norm_nome(q)}%")
+    w_g, a_g, w_m, a_m = "", [], "", []
+    if not _eh_admin(u):
+        where, args = logic.filtro_escola(_escola(con, u["escola_id"]))
+        w_g, a_g, w_m, a_m = f" AND {where}", args, " AND escola_id=?", [u["escola_id"]]
+    rows = con.execute(f"SELECT * FROM geduc WHERE {cond}{w_g} ORDER BY aluno LIMIT 1000", [arg, *a_g])
+    manuais = con.execute(f"SELECT * FROM alunos_manuais WHERE {cond}{w_m} ORDER BY aluno", [arg, *a_m])
     escolas = [dict(e) for e in con.execute("SELECT * FROM escolas")]
     out = []
     for r in rows:
@@ -924,11 +967,15 @@ def importacoes(u: dict = Depends(admin)):
 async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: dict = Depends(admin)):
     if _import["rodando"]:
         raise HTTPException(409, "Já existe uma importação em andamento")
-    data = await arquivo.read()
+    _import.update(rodando=True, msg=[], erro=None)  # antes do upload: impede duas importacoes ao mesmo tempo
+    try:
+        data = await arquivo.read()
+    except Exception:
+        _import["rodando"] = False
+        raise
     nome = arquivo.filename or "arquivo"
 
     def job():
-        _import.update(rodando=True, msg=[], erro=None)
         try:
             con = db.connect()
             if base == "planilha":
@@ -936,8 +983,10 @@ async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: di
 
                 with tempfile.NamedTemporaryFile(suffix=".xlsm", delete=False) as f:
                     f.write(data)
-                importer.import_workbook(f.name, log=_import["msg"].append)
-                Path(f.name).unlink(missing_ok=True)
+                try:
+                    importer.import_workbook(f.name, log=_import["msg"].append)
+                finally:
+                    Path(f.name).unlink(missing_ok=True)
             else:
                 if base not in importer.BASES:
                     raise ValueError("Base desconhecida")

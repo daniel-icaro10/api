@@ -5,8 +5,8 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 ## Como usar
 
 1. Dê dois cliques em `abrir.bat`. O sistema abre em http://127.0.0.1:8010.
-2. No primeiro acesso, crie o login e a senha do **administrador**.
-3. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`/`.csv`).
+2. No primeiro acesso, informe o CPF e crie a senha do **administrador**.
+3. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`, `.xls` ou `.csv`). O cabeçalho pode estar em qualquer uma das primeiras 50 linhas e em qualquer aba do arquivo.
 4. Em **Instituições**, confira o **vínculo GEDUC** das instituições marcadas "0 — vincular", que são as que têm nome diferente no GEDUC. Em **Usuários**, crie os logins e vincule cada um a uma ou mais instituições.
 5. Em **Matriculado**, escolha a instituição, filtre as pendências e clique em **Corrigir** para editar a informação incorreta. Ao salvar, o aluno é reprocessado na hora. Depois selecione os aptos e clique em **Gerar remessa SMTT**.
 
@@ -21,7 +21,8 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 - O nome da instituição ativa aparece no canto superior direito. Quem tem mais de uma instituição troca a ativa pelo menu desse canto, que também tem alterar senha e sair.
 - **Bloqueio**: em Instituições, o botão **Bloquear** impede o acesso à instituição (por exemplo, por pendência de pagamento). O usuário vinculado a outras instituições continua entrando nelas; quem só tem instituições bloqueadas vê o motivo na tela de login e é desconectado na próxima ação.
 - O administrador também pode ser criado pelas variáveis `SMPE_ADMIN_LOGIN` e `SMPE_ADMIN_SENHA`, quando o banco ainda não tem nenhum usuário.
-- A sessão dura 12 horas. As senhas são guardadas com hash PBKDF2.
+- O usuário é o **CPF**, guardado só com os números. No login, o CPF pode ser digitado com ou sem ponto e traço. Logins antigos que não são CPF continuam funcionando, mas todo usuário novo precisa ter CPF válido.
+- A sessão termina quando o navegador é fechado e dura no máximo 12 horas. As senhas são guardadas com hash PBKDF2.
 
 Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2026.4.xlsm"`
 
@@ -30,7 +31,7 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 | Planilha | Sistema |
 |---|---|
 | MENU / botão "Localizar Estudante" | Painel + busca no topo, por nome ou CPF (a instituição busca só nos próprios alunos) |
-| CAD_ESCOLA | Instituições: cadastro com código SMTT, INEP, vínculo GEDUC, acesso e bloqueio |
+| CAD_ESCOLA | Instituições: cadastro com código SMTT, INEP, CNPJ, e-mail, dados do(a) gestor(a) (nome, CPF, contato e e-mail), vínculo GEDUC, acesso e bloqueio |
 | ESCOLA (filtro avançado + colunas AG:AO) | Matriculado: cruzamento GEDUC × Censo × SMTT × Status e CPF consolidado |
 | Botões CPF divergente / com CPF / sem CPF / duplicado / mãe não informada | Abas de filtro do Matriculado |
 | REL_SEM_CPF / REL_SEM_MAE / REL_SIMPLIFICADA | Relatórios para imprimir (o simplificado mostra o CPF mascarado) |
@@ -56,7 +57,7 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 - Histórico de remessas. Cada aluno enviado fica marcado como migrado, e o orçamento conta os migrados reais.
 - **Mãe sem sobrenome**: o nome da mãe precisa ter nome e sobrenome (partículas como DA, DE e DOS não contam). O aluno sem isso não fica apto e, no arquivo, recebe a crítica 18.
 - **Correção e reprocessamento**: a instituição corrige qualquer campo do aluno (nome, CPF, mãe, pai, sexo, nascimento, série, turno, turma, matrícula, endereço, CEP, telefone e documentos). Os campos com problema aparecem destacados, e o aluno é reprocessado ao salvar.
-- **Cadastro individual**: a instituição cadastra, edita e exclui alunos que não estão no GEDUC (botão **Cadastrar aluno** no Matriculado). Esses alunos passam pelas mesmas regras e entram na remessa normalmente.
+- **Cadastro individual**: a instituição cadastra, edita e exclui alunos que não estão no GEDUC (botão **Cadastrar aluno** no Matriculado). O formulário tem **Tipo de ensino** (campo CURSO da remessa, padrão Ensino Fundamental) e **Grau** (1, 2 ou 3). Esses alunos passam pelas mesmas regras e entram na remessa normalmente.
 - **Telefone**: vem da correção, do GEDUC (coluna `TELEFONE`), da base Alunos por status ou do SMTT, nessa ordem. O sistema usa o primeiro número válido do campo e completa o DDD 98 quando falta.
 - **CEP**: vem do GEDUC (coluna `CEP` ou `CEP_ALUNO`), a menos que a instituição corrija. Sem CEP, a remessa usa 65000000.
 - **Orçamento só com CPF**: a base do orçamento é o total de matriculados com CPF consolidado, e só contam os migrados com CPF.

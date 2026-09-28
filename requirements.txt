@@ -5,3 +5,4 @@ uvicorn
 python-multipart
 psycopg[binary]
 reportlab
+xlrd

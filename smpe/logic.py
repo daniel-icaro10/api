@@ -63,7 +63,7 @@ def filtro_escola(escola) -> tuple[str, list]:
 
 # campos do aluno que a instituicao pode corrigir (tabela ajustes) antes de reprocessar
 CAMPOS_AJUSTE = ("aluno", "pai", "genero", "dt_nasc", "ano_serie", "turno", "turma", "matricula", "rua", "numero",
-                 "bairro", "cidade", "cep")
+                 "bairro", "cidade", "cep", "grau", "curso")
 
 
 def manual_como_geduc(m: dict) -> dict:
@@ -112,6 +112,7 @@ def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
         out.append({
             "id_aluno": g["id_aluno"], "aluno": g["aluno"].strip(), "nome_norm": nn, "dt_nasc": nasc,
             "genero": g["genero"], "ano_serie": g["ano_serie"], "turno": g["turno"], "turma": g["turma"],
+            "grau": g.get("grau") or "", "curso": g.get("curso") or "",
             "modalidade": g["modalidade"], "mae": mae, "pai": (g["pai"] or "").strip(),
             "rua": g["rua"], "numero": g["numero"], "bairro": g["bairro"], "cidade": g["cidade"], "cep": g["cep"],
             "cpf_geduc": cpf_g, "cpf_censo": cpf_c, "cpf_smtt": cpf_s, "cpf_status": cpf_st, "cpf_manual": cpf_m,
@@ -219,7 +220,7 @@ def campos_remessa(escola, a: dict) -> dict:
     return {
         "COD_INSTITUICAO": so_digitos(escola["cod_smtt"]).zfill(4) if escola["cod_smtt"] else "",
         "NOME_ESTUDANTE": a["aluno"], "MAE": a["mae"], "PAI": a["pai"],
-        "SEXO": (a["genero"] or " ")[:1], "CURSO": escola["nivel"] or "ENSINO FUNDAMENTAL", "GRAU": "1",
+        "SEXO": (a["genero"] or " ")[:1], "CURSO": a.get("curso") or escola["nivel"] or "ENSINO FUNDAMENTAL", "GRAU": a.get("grau") or "1",
         "SERIE_PERIODO": _serie(a), "TURNO": _turno(a["turno"]), "TURMA": (a["turma"] or "")[:3],
         "MATRICULA": (a["matricula"] or a["id_aluno"] or "").strip(), "DT_NASCIMENTO": _ddmmaaaa(a["dt_nasc"]),
         "ENDERECO": ", ".join(x for x in (a["rua"], a["numero"]) if x), "BAIRRO": a["bairro"],
