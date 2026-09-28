@@ -4,6 +4,7 @@ import io
 import re
 import warnings
 from html.parser import HTMLParser
+from xml.etree import ElementTree
 from pathlib import Path
 
 import openpyxl
@@ -71,8 +72,12 @@ def _find_header(rows: list[tuple], base: str) -> int:
     for i, r in enumerate(rows[:LINHAS_CABECALHO]):
         if obrig & {_h(c) for c in r}:
             return i
+    # mostra o que foi lido para a pessoa identificar o arquivo ou a coluna com outro nome
+    lidas = [[txt(c)[:30] for c in r if txt(c)] for r in rows[:LINHAS_CABECALHO]]
+    lidas = [r for r in lidas if r][:3]
+    visto = " | ".join(", ".join(r[:8]) + ("…" if len(r) > 8 else "") for r in lidas) or "nenhum texto"
     raise ValueError(f"Cabeçalho não encontrado: a planilha precisa ter a coluna {' ou '.join(sorted(obrig))} "
-                     f"nas primeiras {LINHAS_CABECALHO} linhas")
+                     f"nas primeiras {LINHAS_CABECALHO} linhas. Início do arquivo: {visto[:400]}")
 
 
 def _map_columns(header: tuple, cols: dict) -> dict[str, int]:
@@ -125,10 +130,20 @@ def _rows_to_records(base: str, rows_iter) -> list[dict]:
     return recs
 
 
-def _csv_rows(data: bytes) -> list[list]:
+def _texto(data: bytes) -> str:
+    """Arquivo de texto em UTF-8, UTF-16 ("Texto Unicode" do Excel) ou ANSI (cp1252)."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16")
+    amostra = data[:2000]
+    if len(amostra) > 20 and amostra[1::2].count(0) > len(amostra) // 4:  # UTF-16 sem BOM
+        return data.decode("utf-16-le" if amostra[1] == 0 else "utf-16-be", errors="replace")
     text = data.decode("utf-8-sig", errors="replace")
     if text.count("\ufffd") > 5:
         text = data.decode("cp1252", errors="replace")
+    return text
+
+
+def _csv_rows(text: str) -> list[list]:
     amostra = text[:100000]
     sep = max(";,\t", key=amostra.count)  # separador mais frequente (as linhas de titulo nao tem nenhum)
     return list(csv.reader(io.StringIO(text), delimiter=sep))
@@ -158,11 +173,8 @@ class _Tabela(HTMLParser):
             self.cell.append(d)
 
 
-def _html_rows(data: bytes) -> list[tuple]:
+def _html_rows(text: str) -> list[tuple]:
     """'.xls' que na verdade e uma tabela HTML (exportacao comum de sistemas web como o GEDUC)."""
-    text = data.decode("utf-8", errors="replace")
-    if text.count("\ufffd") > 5:
-        text = data.decode("cp1252", errors="replace")
     p = _Tabela()
     p.feed(text)
     return p.rows
@@ -191,14 +203,52 @@ def _xls_sheets(data: bytes) -> list[tuple[str, list]]:
     return out
 
 
+SS = "{urn:schemas-microsoft-com:office:spreadsheet}"
+
+
+def _xml_sheets(text: str) -> list[tuple[str, list]]:
+    """'.xls' que na verdade e XML do Excel 2003 (SpreadsheetML), outra exportacao comum de sistemas web."""
+    raiz = ElementTree.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text))
+    out = []
+    for ws in raiz.iter(SS + "Worksheet"):
+        rows = []
+        for row in ws.iter(SS + "Row"):
+            cels, j = [], 0
+            for c in row.iter(SS + "Cell"):
+                idx = c.get(SS + "Index")
+                if idx and idx.isdigit():  # celulas vazias puladas
+                    cels += [None] * (int(idx) - 1 - j)
+                    j = int(idx) - 1
+                d = c.find(SS + "Data")
+                v = "".join(d.itertext()) if d is not None else None
+                if d is not None and d.get(SS + "Type") == "Number":
+                    try:
+                        f = float(v)
+                        v = int(f) if f.is_integer() else f
+                    except ValueError:
+                        pass
+                cels.append(v)
+                j += 1
+            rows.append(tuple(cels))
+        out.append((ws.get(SS + "Name") or "Planilha", rows))
+    return out
+
+
 def _sheets(filename: str, data: bytes) -> list[tuple[str, list]]:
     """(aba, linhas) de arquivos que nao sao xlsx; o formato e identificado pelo conteudo, nao so pela extensao."""
     if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # xls antigo
         return _xls_sheets(data)
-    if b"<table" in data[:200000].lower():
-        return [(Path(filename).stem, _html_rows(data))]
-    if b"\x00" not in data[:1000]:
-        return [(Path(filename).stem, _csv_rows(data))]
+    text = _texto(data)
+    inicio = text[:200000].lower()
+    if "urn:schemas-microsoft-com:office:spreadsheet" in inicio and "<workbook" in inicio:
+        try:
+            return _xml_sheets(text)
+        except ElementTree.ParseError as ex:
+            raise ValueError(f"Arquivo XML do Excel inválido: {ex}") from ex
+    if "<table" in inicio:
+        return [(Path(filename).stem, _html_rows(text))]
+    if "\x00" not in text[:1000]:
+        return [(Path(filename).stem, _csv_rows(text))]
     raise ValueError("Formato de arquivo não reconhecido. Envie .xlsx, .xlsm, .xls ou .csv")
 
 
