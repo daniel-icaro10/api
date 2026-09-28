@@ -96,7 +96,8 @@ def _clean(base: str, col: str, v):
         return to_date(v)
     if col in CPF_COLS:
         return norm_cpf(v)
-    return txt(v).replace("\x00", "")  # o Postgres recusa texto com caractere nulo
+    # quebras de linha e tabulacoes viram espaco (a remessa e um TXT de linhas fixas); o Postgres recusa o nulo
+    return re.sub(r"\s+", " ", txt(v).replace("\x00", "")).strip()
 
 
 def _rows_to_records(base: str, rows_iter) -> list[dict]:
@@ -144,9 +145,11 @@ def _texto(data: bytes) -> str:
 
 
 def _csv_rows(text: str) -> list[list]:
+    # fim de linha: \r\n (Windows), \n ou so \r (Mac/Excel antigo); \r solto no meio da linha vira espaco
+    text = text.replace("\r\n", "\n").replace("\r", "\n" if "\n" not in text else " ")
     amostra = text[:100000]
     sep = max(";,\t", key=amostra.count)  # separador mais frequente (as linhas de titulo nao tem nenhum)
-    return list(csv.reader(io.StringIO(text), delimiter=sep))
+    return list(csv.reader(io.StringIO(text, newline=""), delimiter=sep))
 
 
 class _Tabela(HTMLParser):

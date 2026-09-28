@@ -235,7 +235,7 @@ def campos_remessa(escola, a: dict) -> dict:
 def linha_remessa(campos: dict, remover_acentos: bool) -> tuple[str, list[str]]:
     avisos, partes = [], []
     for nome, tam in LAYOUT:
-        v = str(campos.get(nome) or "").upper()
+        v = re.sub(r"\s+", " ", str(campos.get(nome) or "")).strip().upper()  # quebra de linha partiria o registro
         if remover_acentos:
             v = sem_acento(v)
         if len(v) > tam:
