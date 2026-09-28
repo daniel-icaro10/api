@@ -74,12 +74,24 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .card-h h2{font-size:15px;margin:0;font-weight:650;color:var(--navy)}
 .card-b{padding:18px}
 .table-wrap{overflow:auto;max-height:calc(100vh - 360px)}
+/* padrao unico de tabela: cabecalho fixo, linhas zebradas, destaque ao passar o mouse */
 table{width:100%;border-collapse:separate;border-spacing:0}
-th,td{padding:11px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:13px}
-th{position:sticky;top:0;background:#f8fbff;font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;z-index:1;white-space:nowrap}
+th,td{padding:10px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;font-size:13px}
+th{position:sticky;top:0;background:#eef4fc;font-size:11px;color:var(--navy);font-weight:700;text-transform:uppercase;letter-spacing:.05em;z-index:1;white-space:nowrap;border-bottom:2px solid var(--blue-soft-2)}
 tbody tr{transition:background .1s}
-tbody tr:hover{background:#f5f9ff}
+tbody tr:nth-child(even){background:#f9fbfe}
+tbody tr:hover{background:#eaf2fe}
 tbody tr:last-child td{border-bottom:0}
+td.acoes{width:1%;white-space:nowrap}
+td.acoes .row{gap:6px;flex-wrap:nowrap;justify-content:flex-end}
+.mb table{border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:6px}
+.mb table th{position:static}
+/* download padrao (Excel, TXT, PDF) */
+.btn-dl{font:inherit;font-weight:600;display:inline-flex;align-items:center;gap:7px;border:1px solid #b7dfc8;background:#effaf3;color:#11703f;border-radius:var(--radius-sm);padding:9px 14px;cursor:pointer;white-space:nowrap;text-decoration:none;transition:all .15s}
+.btn-dl:hover{background:#dff4e8;border-color:#11703f;color:#0b5a31;text-decoration:none}
+.btn-dl:disabled{opacity:.55;cursor:progress}
+.btn-dl.btn-sm{padding:4px 10px;font-size:12px;border-radius:8px;gap:5px}
+.btn-dl.btn-sm svg.i{width:14px;height:14px}
 tr.click{cursor:pointer}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px;white-space:nowrap}
@@ -150,12 +162,14 @@ pre.linhas{background:var(--navy);color:#cfe0ff;border-radius:var(--radius-sm);p
 .doc table{border-collapse:collapse}
 .doc table th{background:var(--blue-soft);color:var(--navy);position:static;text-transform:none;letter-spacing:0;font-size:12px}
 .doc td,.doc th{border:1px solid #cfd9e8;font-size:12px}
+.doc tbody tr:nth-child(even){background:#f5f8fd}
+.doc tbody tr:hover{background:inherit}
 .doc .fill{display:inline-block;min-width:150px}
 .doc .note{font-size:12.5px;margin-top:18px;padding:12px 14px;border-left:3px solid var(--blue);background:var(--soft);border-radius:0 8px 8px 0}
 @media print{
   .side,.top,.no-print{display:none!important}
   body{background:#fff;display:block}.view{padding:0}.doc{border:0;padding:0;max-width:none;box-shadow:none}
-  .doc th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .doc th,.doc tbody tr{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 @media (max-width:900px){
   .side{position:fixed;left:-270px;transition:left .2s;box-shadow:var(--shadow-lg)}.side.open{left:0}
@@ -210,7 +224,7 @@ nav{overflow-y:auto;min-height:0}
 .cnt.over{color:var(--err);font-weight:700}
 .campo-longo input{border-color:var(--err);background:var(--err-soft)}
 .pend-cell{display:flex;flex-wrap:wrap;align-items:center;gap:2px}
-.btn-sm{padding:3px 9px;font-size:12px;border-radius:8px}
+.btn-sm{padding:4px 10px;font-size:12px;border-radius:8px}
 @media (max-width:900px){.user-txt{display:none}.user-btn{padding:4px}}
 .campo-err input,.campo-err select{border-color:var(--err);background:var(--err-soft)}
 .campo-err label{color:var(--err)}

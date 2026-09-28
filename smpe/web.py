@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import critica, db, importer, logic, pdf
+from . import critica, db, exportar, importer, logic, pdf
 from .util import cpf_valido, norm_cpf, norm_nome, so_digitos
 
 app = FastAPI(title="SIS SMPE")
@@ -1037,6 +1037,31 @@ def logo_padrao(u: dict = Depends(admin)):
     with con:
         con.execute("DELETE FROM arquivos_config WHERE chave='logo'")
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ exportacao das tabelas (Excel)
+
+class ColunaIn(BaseModel):
+    titulo: str
+    tipo: str = "texto"
+
+
+class ExportarIn(BaseModel):
+    titulo: str
+    subtitulo: str = ""
+    colunas: list[ColunaIn]
+    linhas: list[list]
+
+
+@app.post("/api/exportar")
+def exportar_tabela(d: ExportarIn, u: dict = Depends(usuario)):
+    """Qualquer tabela da tela vira .xlsx no layout padrao (a tela envia so o que o usuario ja ve)."""
+    if len(d.linhas) > 200_000:
+        raise HTTPException(400, "Tabela grande demais para exportar")
+    conteudo = exportar.gerar(d.titulo, [c.model_dump() for c in d.colunas], d.linhas, d.subtitulo, u["login"])
+    nome = exportar.nome_arquivo(d.titulo)
+    return Response(conteudo, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
 
 # ------------------------------------------------------------------ importacao

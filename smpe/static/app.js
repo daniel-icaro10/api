@@ -9,6 +9,29 @@ const fmtData = d => d ? d.slice(0, 10).split("-").reverse().join("/") : "";
 const fmtCNPJ = c => c && c.length === 14 ? `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}` : (c || "");
 const fmtCPF = c => c && c.length === 11 ? `${c.slice(0,3)}.${c.slice(3,6)}.${c.slice(6,9)}-${c.slice(9)}` : (c || "");
 const agora = () => new Date().toLocaleString("pt-BR");
+const fmtDH = s => s ? fmtData(s) + (s.length > 10 ? " " + s.slice(11, 16) : "") : "";  // "AAAA-MM-DD HH:MM:SS" -> "DD/MM/AAAA HH:MM"
+const icDl = `<svg class="i"><use href="#i-download"/></svg>`;
+
+// download padrao das tabelas: cada tela registra XLS[id] = () => ({titulo, subtitulo, colunas: [[titulo, tipo]], linhas})
+// tipos: texto, numero, decimal, moeda, pct, data, datahora, cpf. Sempre baixa a lista inteira (todas as paginas) com os filtros.
+const XLS = {};
+const btnXls = id => `<button type="button" class="btn-dl" data-xls="${id}" title="Baixar a lista completa em Excel (todas as páginas, com os filtros aplicados)">${icDl}Baixar Excel</button>`;
+async function baixarXls(id, botao) {
+  const t = XLS[id]?.();
+  if (!t) return;
+  if (!t.linhas.length) return toast("Nada para baixar: a tabela está vazia");
+  botao.disabled = true;
+  try {
+    const r = await api("/api/exportar", {method: "POST", body: {titulo: t.titulo, subtitulo: t.subtitulo || "",
+      colunas: t.colunas.map(([titulo, tipo = "texto"]) => ({titulo, tipo})), linhas: t.linhas.map(l => l.map(v => v ?? ""))}});
+    const nome = (r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1] || "planilha.xlsx";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await r.blob()); a.download = nome; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(`Planilha baixada: ${fmtN(t.linhas.length)} linha(s)`);
+  } finally { botao.disabled = false; }
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-xls]"); if (b) baixarXls(b.dataset.xls, b); });
 
 async function api(url, opts = {}) {
   const o = {...opts};
@@ -125,6 +148,7 @@ const LEGENDA = {0: "Instituição deve ser informada e ser um número inteiro",
   11: "Bairro deve ser informado", 12: "Cidade deve ser informada", 13: "Nome do pai inválido", 14: "CPF é requerido",
   15: "CPF duplicado", 16: "CPF inválido", 17: "Quantidade de colunas diferente do layout (375)",
   18: "Nome da mãe deve ter nome e sobrenome (regra do SIS SMPE)"};
+const pendTxt = a => a.pendencias.map(k => k === "critica_smtt" ? `Crítica SMTT ${(a.criticas || []).map(x => `(${x})`).join("")}` : PEND[k][0]).join("; ");
 const codBadges = cs => (cs || []).map(k => `<span class="badge b-err" title="${esc(LEGENDA[k])}">(${k}) ${esc(LEGENDA[k])}</span>`).join("");
 const pendBadges = (p, crit) => p.map(k => k === "critica_smtt" && crit?.length
   ? `<span class="badge b-err" title="${esc(crit.map(x => `(${x}) ${LEGENDA[x]}`).join("\n"))}">Crítica SMTT ${crit.map(x => `(${x})`).join("")}</span>`
@@ -233,7 +257,7 @@ async function painel() {
     </div>
     <div class="card">
       <div class="card-h"><h2>Situação por instituição</h2><span class="spacer"></span>
-        <input id="fEsc" placeholder="Filtrar instituição…" style="width:240px"></div>
+        <input id="fEsc" placeholder="Filtrar instituição…" style="width:240px">${btnXls("painel")}</div>
       <div class="table-wrap" style="max-height:none"><table id="tbEsc"><thead><tr>
         <th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th class="num">Matric.</th><th class="num">Com CPF</th><th>Índice CPF</th>
         <th class="num">Sem CPF</th><th class="num">Diverg.</th><th class="num">Sem mãe</th><th class="num">Aptos</th><th class="num">Migrados</th>
@@ -249,8 +273,14 @@ async function painel() {
         <td class="num">${e.sem_cpf || ""}</td><td class="num">${e.divergentes ? `<b style="color:var(--err)">${e.divergentes}</b>` : ""}</td>
         <td class="num">${(e.sem_mae + e.mae_incompleta) || ""}</td><td class="num">${fmtN(e.aptos)}</td><td class="num">${e.migrados ? fmtN(e.migrados) : ""}</td>
       </tr>`;
+  const filtradas = () => { const q = $("#fEsc").value.toLowerCase(); return d.escolas.filter(e => e.nome.toLowerCase().includes(q)); };
+  XLS.painel = () => ({titulo: "Situação por instituição", subtitulo: $("#fEsc").value && `Filtro: ${$("#fEsc").value}`,
+    colunas: [["ID", "numero"], ["Instituição"], ["Cód. SMTT"], ["Matriculados", "numero"], ["Com CPF", "numero"], ["Índice CPF", "pct"],
+      ["Sem CPF", "numero"], ["CPF divergente", "numero"], ["Sem mãe / sem sobrenome", "numero"], ["Aptos", "numero"], ["Migrados", "numero"], ["Situação"]],
+    linhas: filtradas().map(e => [e.id, e.nome, e.cod_smtt, e.matriculados, e.com_cpf, e.indice_cpf, e.sem_cpf, e.divergentes,
+      e.sem_mae + e.mae_incompleta, e.aptos, e.migrados, e.bloqueado ? "Bloqueada" : "Ativa"])});
   const renderEsc = () => {
-    const q = $("#fEsc").value.toLowerCase(), pg = paginar("painel", d.escolas.filter(e => e.nome.toLowerCase().includes(q)), renderEsc);
+    const pg = paginar("painel", filtradas(), renderEsc);
     $("#tbEscBody").innerHTML = pg.itens.map(rowEsc).join("") || `<tr><td colspan="11" class="empty">Nenhuma instituição encontrada.</td></tr>`;
     $("#pgEsc").innerHTML = pg.html;
   };
@@ -299,7 +329,7 @@ async function migracao(eid) {
       <div class="kpi ok"><div class="l">Aptos / migrados</div><div class="v">${fmtN(r.aptos)}</div><div class="s">${fmtN(r.migrados)} já migrados</div></div>
     </div>
     <div class="card">
-      <div class="card-h"><div class="tabs" id="tabs"></div></div>
+      <div class="card-h"><div class="tabs" id="tabs" style="flex:1"></div>${btnXls("alunos")}</div>
       <div class="card-h">
         <input id="qAluno" placeholder="Buscar aluno, mãe ou CPF…" style="max-width:300px">
         <select id="fTurma" style="max-width:220px"><option value="">Todas as turmas</option>${[...new Set(d.alunos.map(a => a.turma))].sort().map(t => `<option>${esc(t)}</option>`).join("")}</select>
@@ -319,6 +349,12 @@ async function migracao(eid) {
   $("#chkAll").onchange = ev => { visiveis().forEach(a => ev.target.checked ? MIG.sel.add(a.id_aluno) : MIG.sel.delete(a.id_aluno)); renderAlunos(); };
   $("#btnRemessa").onclick = () => previaRemessa(eid, [...MIG.sel]);
   $("#btnNovoAluno").onclick = () => novoAluno(eid);
+  XLS.alunos = () => ({titulo: `Matriculados - ${e.nome}`,
+    subtitulo: [FILTROS.find(x => x[0] === MIG.filtro)[1], MIG.turma && `Turma ${MIG.turma}`, MIG.q && `Busca: ${MIG.q}`].filter(Boolean).join(" · "),
+    colunas: [["ID aluno"], ["Aluno"], ["Nascimento", "data"], ["Turma"], ["Turno"], ["Mãe"], ["CPF consolidado", "cpf"], ["Pendências"], ["Apto"],
+      ["Migrado"], ["CPF GEDUC", "cpf"], ["CPF Censo", "cpf"], ["CPF SMTT", "cpf"], ["CPF Status", "cpf"], ["Situação"], ["Telefone"]],
+    linhas: visiveis().map(a => [a.id_aluno, a.aluno, a.dt_nasc, a.turma, a.turno, a.mae, a.cpf, pendTxt(a), a.apto ? "Sim" : "Não",
+      a.migrado ? "Sim" : "Não", a.cpf_geduc, a.cpf_censo, a.cpf_smtt, a.cpf_status, a.situacao, a.telefone])});
   $("#tbAlunos").onclick = ev => {
     if (ev.target.type === "checkbox") { ev.target.checked ? MIG.sel.add(ev.target.value) : MIG.sel.delete(ev.target.value); updSel(); return; }
     const tr = ev.target.closest("tr[data-id]"); if (tr) abrirAluno(tr.dataset.id);
@@ -465,7 +501,7 @@ async function abrirAluno(id) {
         <dt>RG</dt><dd>${esc(x.rg) || "—"} ${esc(x.org_exp)}</dd><dt>Celular</dt><dd>${esc(x.celular || x.telefone) || "—"}</dd><dt>Cadastrado</dt><dd>${esc(x.cadastrado)}</dd></dl>`)}
       ${src("Alunos por status", d.status, x => `<dl class="src"><dt>CPF</dt><dd class="mono">${fmtCPF(x.cpf) || "—"}</dd><dt>Situação</dt><dd>${esc(x.situacao) || "—"}</dd>
         <dt>Telefone</dt><dd>${esc(x.telefone) || "—"}</dd><dt>Mãe</dt><dd>${esc(x.mae) || "—"}</dd></dl>`)}
-      ${d.lotes.length ? `<h3>Remessas</h3>${d.lotes.map(l => `<div>#${l.id} · ${esc(l.criado_em)} · <a href="/api/lotes/${l.id}/arquivo">${esc(l.arquivo)}</a> · <a href="/api/lotes/${l.id}/pdf">PDF</a></div>`).join("")}` : ""}
+      ${d.lotes.length ? `<h3>Remessas</h3>${d.lotes.map(l => `<div class="row" style="gap:8px;margin-bottom:6px"><span>#${l.id} · ${fmtDH(l.criado_em)} · <span class="mono">${esc(l.arquivo)}</span></span><span class="spacer"></span><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/arquivo">${icDl}TXT</a><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/pdf">${icDl}PDF</a></div>`).join("")}` : ""}
     </div>`);
   const fAj = $("#fAj"), inicial = Object.fromEntries(new FormData(fAj));
   contadores(fAj); grauDoCurso(fAj, cursos);
@@ -490,7 +526,10 @@ async function abrirAluno(id) {
 async function previaRemessa(eid, ids) {
   const p = await api(`/api/escolas/${eid}/remessa/previa`, {method: "POST", body: {ids, remover_acentos: true}});
   const ok = p.itens.filter(i => !i.erros.length), rej = p.itens.filter(i => i.erros.length), av = ok.filter(i => i.avisos.length);
-  modal(`<div class="mh"><h2>Remessa SMTT — prévia</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+  XLS.previa = () => ({titulo: "Prévia da remessa SMTT", subtitulo: `${ok.length} enviado(s) · ${rej.length} rejeitado(s)`,
+    colunas: [["Aluno"], ["CPF", "cpf"], ["Situação"], ["Motivos e avisos"]],
+    linhas: p.itens.map(i => [i.aluno, i.cpf, i.erros.length ? "Rejeitado" : "Será enviado", [...i.erros, ...i.avisos].join("; ")])});
+  modal(`<div class="mh"><h2>Remessa SMTT — prévia</h2><span class="spacer"></span>${btnXls("previa")}<button onclick="closeModal()">×</button></div>
     <div class="mb">
       <div class="grid kpis" style="grid-template-columns:repeat(3,1fr)">
         <div class="kpi ok"><div class="l">Serão enviados</div><div class="v">${fmtN(ok.length)}</div></div>
@@ -498,8 +537,8 @@ async function previaRemessa(eid, ids) {
         <div class="kpi warn"><div class="l">Com campos truncados</div><div class="v">${fmtN(av.length)}</div></div>
       </div>
       <p class="muted">Layout oficial SMPE: ${p.tam_linha} colunas por linha, ${p.layout.length} campos, UTF-8, sem acentos. Arquivo <b class="mono">INST_&lt;código&gt;_REM_&lt;nº&gt;.txt</b>. Os alunos passam pelas mesmas críticas do validador AlunoCritica.</p>
-      ${rej.length ? `<h3>Rejeitados</h3><table><tbody>${rej.map(i => `<tr><td>${esc(i.aluno)}</td><td>${i.erros.map(esc).join("; ")}</td></tr>`).join("")}</tbody></table>` : ""}
-      ${av.length ? `<h3>Avisos</h3><table><tbody>${av.slice(0, 50).map(i => `<tr><td>${esc(i.aluno)}</td><td class="muted">${i.avisos.map(esc).join("; ")}</td></tr>`).join("")}</tbody></table>` : ""}
+      ${rej.length ? `<h3>Rejeitados</h3><table><thead><tr><th>Aluno</th><th>Motivo</th></tr></thead><tbody>${rej.map(i => `<tr><td>${esc(i.aluno)}</td><td>${i.erros.map(esc).join("; ")}</td></tr>`).join("")}</tbody></table>` : ""}
+      ${av.length ? `<h3>Avisos</h3><table><thead><tr><th>Aluno</th><th>Aviso</th></tr></thead><tbody>${av.slice(0, 50).map(i => `<tr><td>${esc(i.aluno)}</td><td class="muted">${i.avisos.map(esc).join("; ")}</td></tr>`).join("")}</tbody></table>` : ""}
       <h3>Amostra do arquivo</h3><pre class="linhas">${esc(p.amostra.join("\n"))}</pre>
     </div>
     <div class="mf"><button onclick="closeModal()">Cancelar</button><button class="primary" id="confRem" ${ok.length ? "" : "disabled"}>Gerar e baixar (${fmtN(ok.length)})</button></div>`);
@@ -517,18 +556,27 @@ async function escolas() {
   const pn = await api("/api/painel");
   const res = Object.fromEntries(pn.escolas.map(e => [e.id, e]));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} instituições</h2><span class="spacer"></span>
-      <input id="fE" placeholder="Filtrar…" style="width:220px"><button class="primary" id="novaEsc">Nova instituição</button></div>
+      <input id="fE" placeholder="Filtrar…" style="width:220px">${btnXls("escolas")}<button class="primary" id="novaEsc">Nova instituição</button></div>
     <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th><th>Usuários</th><th>Situação</th><th></th></tr></thead>
     <tbody id="tbEBody"></tbody></table></div><div id="pgE"></div></div>`;
   const rowE = e => `<tr data-n="${esc(e.nome.toLowerCase())}"><td>${e.id}</td><td>${esc(e.nome)}</td><td class="mono">${esc(e.cod_smtt)}</td><td class="mono">${esc(e.inep)}</td>
       <td>${e.geduc_nome ? esc(e.geduc_nome) : `<span class="muted">mesmo nome</span>`}</td>
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
-      <td>${e.logins?.length ? e.logins.map(l => `<div class="mono">${esc(l)}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
+      <td>${e.logins?.length ? e.logins.map(l => `<div class="mono">${esc(fmtCPF(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
       <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : `<span class="badge b-ok">ativa</span>`}</td>
-      <td style="width:1%"><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn-sm" data-ed="${e.id}">Editar</button>
+      <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${e.id}">Editar</button>
         <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
+  const filtradas = () => { const q = $("#fE").value.toLowerCase(); return ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q); };
+  XLS.escolas = () => ({titulo: "Instituições", subtitulo: $("#fE").value && `Filtro: ${$("#fE").value}`,
+    colunas: [["ID", "numero"], ["Instituição"], ["Cód. SMTT"], ["INEP"], ["CNPJ"], ["E-mail"], ["Vínculo GEDUC"], ["Alunos GEDUC", "numero"],
+      ["Usuários"], ["Representantes"], ["Cursos"], ["Situação"]],
+    linhas: filtradas().map(e => [e.id, e.nome, e.cod_smtt, e.inep, fmtCNPJ(e.cnpj), e.email, e.geduc_nome || "mesmo nome",
+      res[e.id]?.matriculados || 0, (e.logins || []).map(fmtCPF).join("\n"),
+      (e.representantes || []).map(r => [r.nome, r.cargo, r.contato, r.email].filter(Boolean).join(" · ")).join("\n"),
+      (e.cursos || []).map(c => `${c.curso} (grau ${c.grau})`).join("\n"),
+      e.bloqueado ? "Bloqueada" + (e.motivo_bloqueio ? `: ${e.motivo_bloqueio}` : "") : "Ativa"])});
   const renderE = () => {
-    const q = $("#fE").value.toLowerCase(), pg = paginar("escolas", ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q), renderE);
+    const pg = paginar("escolas", filtradas(), renderE);
     $("#tbEBody").innerHTML = pg.itens.map(rowE).join("") || `<tr><td colspan="9" class="empty">Nenhuma instituição encontrada.</td></tr>`;
     $("#pgE").innerHTML = pg.html;
   };
@@ -637,10 +685,10 @@ async function editarEscola(id) {
 async function remessas(_, qs) {
   const eid = qs.get("escola") || "";
   const ls = await api("/api/lotes" + (eid ? "?escola_id=" + eid : ""));
-  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>Remessas geradas</h2><span class="spacer"></span><div style="width:360px" data-admin>${escolaSelect("selEscR", eid)}</div></div>
+  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>Remessas geradas</h2><span class="spacer"></span>${ls.length ? btnXls("remessas") : ""}<div style="width:360px" data-admin>${escolaSelect("selEscR", eid)}</div></div>
     ${ls.length ? `<div class="table-wrap" style="max-height:none"><table id="tbL"><thead><tr><th>#</th><th>Instituição</th><th>Gerada em</th><th class="num">Alunos</th><th>Arquivo</th><th></th></tr></thead><tbody id="tbLBody"></tbody></table></div><div id="pgL"></div>` : `<div class="empty">Nenhuma remessa gerada. Selecione alunos em <a href="#/migracao">Matriculado</a> e clique em “Gerar remessa SMTT”.</div>`}</div>
     <div class="card" style="margin-top:16px"><div class="card-h"><h2>Arquivo do processamento final</h2><span class="spacer"></span>
-      <span class="muted">TXT do processamento final + PDF com os CPFs dos alunos (os dois são obrigatórios)</span></div>
+      <span class="muted">TXT do processamento final + PDF com os CPFs dos alunos (os dois são obrigatórios)</span><span id="xlsFinais"></span></div>
       <div class="card-b"><form id="fFinal" class="row" style="align-items:flex-end">
         ${ehAdmin() ? `<div style="min-width:280px;flex:1"><label>Instituição</label>${escolaSelect("selEscF", eid)}</div>` : ""}
         <div style="flex:1;min-width:220px"><label>Arquivo TXT do processamento final</label><input type="file" name="txt" accept=".txt" required></div>
@@ -648,16 +696,22 @@ async function remessas(_, qs) {
         <button class="primary">Importar arquivos</button></form></div>
       <div id="finais"></div></div>`;
   $("#selEscR").onchange = ev => { resetPag("remessas"); location.hash = "#/remessas?escola=" + ev.target.value; };
-  const rowL = l => `<tr><td>${l.id}</td><td>${esc(l.escola)}</td><td>${esc(l.criado_em)}</td><td class="num">${fmtN(l.n_alunos)}</td>
-      <td class="mono">${esc(l.arquivo)}</td><td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn" href="/api/lotes/${l.id}/arquivo">Baixar TXT</a><a class="btn" href="/api/lotes/${l.id}/pdf">Baixar PDF</a><a class="btn" href="#/critica?lote=${l.id}">Criticar</a><button data-ver="${l.id}">Alunos</button><button class="danger" data-del="${l.id}">Excluir</button></td></tr>`;
+  XLS.remessas = () => ({titulo: "Remessas SMTT", colunas: [["#", "numero"], ["Instituição"], ["Gerada em", "datahora"], ["Alunos", "numero"], ["Arquivo"]],
+    linhas: ls.map(l => [l.id, l.escola, l.criado_em, l.n_alunos, l.arquivo])});
+  const rowL = l => `<tr><td>${l.id}</td><td>${esc(l.escola)}</td><td>${fmtDH(l.criado_em)}</td><td class="num">${fmtN(l.n_alunos)}</td>
+      <td class="mono">${esc(l.arquivo)}</td><td class="acoes"><div class="row"><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/arquivo">${icDl}TXT</a><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/pdf">${icDl}PDF</a><a class="btn btn-sm" href="#/critica?lote=${l.id}">Criticar</a><button class="btn-sm" data-ver="${l.id}">Alunos</button><button class="btn-sm danger" data-del="${l.id}">Excluir</button></div></td></tr>`;
   const renderL = () => { const pg = paginar("remessas", ls, renderL); if ($("#tbLBody")) { $("#tbLBody").innerHTML = pg.itens.map(rowL).join(""); $("#pgL").innerHTML = pg.html; } };
   renderL();
   const finais = async () => {
     const fs = await api("/api/arquivos-finais" + (eid ? "?escola_id=" + eid : ""));
+    XLS.finais = () => ({titulo: "Arquivos do processamento final", colunas: [["#", "numero"], ["Instituição"], ["Importado em", "datahora"],
+      ["Enviado por", "cpf"], ["Arquivo TXT"], ["Registros", "numero"], ["PDF (CPFs)"]],
+      linhas: fs.map(f => [f.id, f.escola, f.criado_em, f.enviado_por, f.txt_nome, f.n_registros, f.pdf_nome])});
+    $("#xlsFinais").innerHTML = fs.length ? btnXls("finais") : "";
     $("#finais").innerHTML = fs.length ? `<div class="table-wrap" style="max-height:none"><table><thead><tr><th>#</th><th>Instituição</th><th>Importado em</th><th>Por</th><th>TXT</th><th class="num">Registros</th><th>PDF (CPFs)</th><th></th></tr></thead><tbody>
-      ${fs.map(f => `<tr><td>${f.id}</td><td>${esc(f.escola)}</td><td>${esc(f.criado_em)}</td><td>${esc(f.enviado_por)}</td>
-        <td><a href="/api/arquivos-finais/${f.id}/txt" class="mono">${esc(f.txt_nome)}</a></td><td class="num">${fmtN(f.n_registros)}</td>
-        <td><a href="/api/arquivos-finais/${f.id}/pdf">${esc(f.pdf_nome)}</a></td><td><button class="danger" data-delf="${f.id}">Excluir</button></td></tr>`).join("")}</tbody></table></div>`
+      ${fs.map(f => `<tr><td>${f.id}</td><td>${esc(f.escola)}</td><td>${fmtDH(f.criado_em)}</td><td class="mono">${esc(fmtCPF(f.enviado_por))}</td>
+        <td class="mono">${esc(f.txt_nome)}</td><td class="num">${fmtN(f.n_registros)}</td><td>${esc(f.pdf_nome)}</td>
+        <td class="acoes"><div class="row"><a class="btn-dl btn-sm" href="/api/arquivos-finais/${f.id}/txt">${icDl}TXT</a><a class="btn-dl btn-sm" href="/api/arquivos-finais/${f.id}/pdf">${icDl}PDF</a><button class="btn-sm danger" data-delf="${f.id}">Excluir</button></div></td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty" style="padding:24px">Nenhum arquivo final importado.</div>`;
   };
   finais();
@@ -678,8 +732,9 @@ async function remessas(_, qs) {
     const v = ev.target.dataset.ver, d = ev.target.dataset.del;
     if (v) {
       const al = await api(`/api/lotes/${v}/alunos`);
+      XLS.lote = () => ({titulo: `Remessa ${v} - alunos`, colunas: [["Aluno"], ["CPF", "cpf"]], linhas: al.map(a => [a.nome, a.cpf])});
       const ver = () => { const pg = paginar("lote", al, ver, 25);
-        modal(`<div class="mh"><h2>Remessa #${v} — ${al.length} alunos</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div><div class="mb"><table><thead><tr><th>Aluno</th><th>CPF</th></tr></thead><tbody>${pg.itens.map(a => `<tr><td>${esc(a.nome)}</td><td class="mono">${fmtCPF(a.cpf)}</td></tr>`).join("")}</tbody></table>${pg.html}</div>`); };
+        modal(`<div class="mh"><h2>Remessa #${v} — ${al.length} alunos</h2><span class="spacer"></span>${btnXls("lote")}<button onclick="closeModal()">×</button></div><div class="mb"><table><thead><tr><th>Aluno</th><th>CPF</th></tr></thead><tbody>${pg.itens.map(a => `<tr><td>${esc(a.nome)}</td><td class="mono">${fmtCPF(a.cpf)}</td></tr>`).join("")}</tbody></table>${pg.html}</div>`); };
       resetPag("lote"); ver();
     }
     if (d && confirm(`Excluir a remessa #${d}? Os alunos voltam a ficar como não migrados.`)) { await api(`/api/lotes/${d}`, {method: "DELETE"}); toast("Remessa excluída"); remessas(_, qs); }
@@ -718,11 +773,16 @@ function renderCritica(r) {
       <div class="kpi"><div class="l">Colunas por linha</div><div class="v">${r.tam_linha}</div><div class="s">layout oficial</div></div>
     </div>
     <div class="card" style="margin-bottom:16px"><div class="card-h"><h2>Registros com crítica (${fmtN(erros.length)})</h2><span class="spacer"></span>
-      <button id="baixarCrit" class="primary">Baixar relatório de crítica</button></div>
+      ${btnXls("critica")}<button id="baixarCrit" class="btn-dl">${icDl}Baixar relatório TXT</button></div>
       ${erros.length ? `<div class="table-wrap"><table><thead><tr><th>Linha</th><th>Nome do estudante</th><th>CPF</th><th>Nascimento</th><th>Colunas</th><th>Críticas</th></tr></thead><tbody id="tbCrit"></tbody></table></div><div id="pgCrit"></div>` : `<div class="empty">Nenhum registro com crítica.</div>`}</div>
     <div class="card"><div class="card-h"><h2>Legenda explicativa</h2></div><div class="table-wrap" style="max-height:none"><table><thead><tr><th>Cód.</th><th>Regra</th><th class="num">Ocorrências</th></tr></thead><tbody>
       ${Object.entries(LEGENDA).map(([k, v]) => `<tr><td><b>(${k})</b></td><td>${esc(v)}</td><td class="num">${cont[k] ? `<b style="color:var(--err)">${cont[k]}</b>` : "—"}</td></tr>`).join("")}
       ${r.obs.map(o => `<tr><td></td><td class="muted" colspan="2">${esc(o)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  XLS.critica = () => ({titulo: `Crítica ${r.arquivo || "da remessa"}`, subtitulo: `${r.ok} registro(s) OK · ${r.nao_ok} com crítica`,
+    colunas: [["Linha", "numero"], ["Nome do estudante"], ["CPF", "cpf"], ["Nascimento", "data"], ["Colunas", "numero"], ["Situação"], ["Críticas"]],
+    linhas: r.registros.map(x => x.branco ? [x.linha, "(linha em branco)", "", "", x.colunas, "Com crítica", "O formato do arquivo não aceita linhas em branco"]
+      : [x.linha, x.campos.NOME_ESTUDANTE, x.campos.CPF, x.campos.DT_NASCIMENTO.replace(/^(\d\d)(\d\d)(\d{4})$/, "$3-$2-$1"), x.colunas,
+         x.codigos.length ? "Com crítica" : "OK", x.codigos.map(k => `(${k}) ${LEGENDA[k]}`).join("; ")])});
   const rowC = x => x.branco ? `<tr><td>${x.linha}</td><td colspan="5"><span class="badge b-err">Linha em branco</span></td></tr>` : `<tr><td>${x.linha}</td><td><b>${esc(x.campos.NOME_ESTUDANTE)}</b><div class="muted">Mãe: ${esc(x.campos.MAE) || "—"}</div></td>
         <td class="mono">${esc(x.campos.CPF) || "—"}</td><td class="mono">${esc(x.campos.DT_NASCIMENTO)}</td><td class="num">${x.colunas}</td><td>${codBadges(x.codigos)}</td></tr>`;
   const renderC = () => { const pg = paginar("critica", erros, renderC); if ($("#tbCrit")) { $("#tbCrit").innerHTML = pg.itens.map(rowC).join(""); $("#pgCrit").innerHTML = pg.html; } };
@@ -737,11 +797,17 @@ function renderCritica(r) {
 // ------------------------------------------------------------------ relatorios
 const RELS = {
   sem_cpf: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES SEM CPF", cols: ["LINHA", "NOME DO ESTUDANTE", "DATA NASC", "SEXO", "MÃE", "TURMA", "INFORME O CPF"],
-    row: (a, i) => [i, esc(a.aluno) + (a.divergente ? ' <small>(CPF divergente)</small>' : ""), fmtData(a.dt_nasc), a.sexo, esc(a.mae), esc(a.turma), `<span class="fill"></span>`]},
+    row: (a, i) => [i, esc(a.aluno) + (a.divergente ? ' <small>(CPF divergente)</small>' : ""), fmtData(a.dt_nasc), a.sexo, esc(a.mae), esc(a.turma), `<span class="fill"></span>`],
+    xcols: [["Linha", "numero"], ["Nome do estudante"], ["Data nasc.", "data"], ["Sexo"], ["Mãe"], ["Turma"], ["Observação"], ["Informe o CPF"]],
+    xrow: (a, i) => [i, a.aluno, a.dt_nasc, a.sexo, a.mae, a.turma, a.divergente ? "CPF divergente" : "", ""]},
   sem_mae: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES SEM MÃE", cols: ["LINHA", "NOME DO ESTUDANTE", "DATA NASC", "SEXO", "INFORME A MÃE", "TURMA", "CPF"],
-    row: (a, i) => [i, esc(a.aluno), fmtData(a.dt_nasc), a.sexo, `<span class="fill"></span>`, esc(a.turma), fmtCPF(a.cpf)]},
+    row: (a, i) => [i, esc(a.aluno), fmtData(a.dt_nasc), a.sexo, `<span class="fill"></span>`, esc(a.turma), fmtCPF(a.cpf)],
+    xcols: [["Linha", "numero"], ["Nome do estudante"], ["Data nasc.", "data"], ["Sexo"], ["Informe a mãe"], ["Turma"], ["CPF", "cpf"]],
+    xrow: (a, i) => [i, a.aluno, a.dt_nasc, a.sexo, "", a.turma, a.cpf]},
   simplificada: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES", cols: ["LINHA", "NOME DO ESTUDANTE", "CPF", "DATA NASC", "MÃE"],
-    row: (a, i) => [i, esc(a.aluno), `<span class="mono">${a.cpf_mascarado || "—"}</span>`, fmtData(a.dt_nasc), esc(a.mae)]},
+    row: (a, i) => [i, esc(a.aluno), `<span class="mono">${a.cpf_mascarado || "—"}</span>`, fmtData(a.dt_nasc), esc(a.mae)],
+    xcols: [["Linha", "numero"], ["Nome do estudante"], ["CPF"], ["Data nasc.", "data"], ["Mãe"]],
+    xrow: (a, i) => [i, a.aluno, a.cpf_mascarado, a.dt_nasc, a.mae]},
 };
 async function relatorios(eid, qs) {
   eid = eid || ultimaEscola();
@@ -749,12 +815,13 @@ async function relatorios(eid, qs) {
   $("#view").innerHTML = `<div class="row no-print" style="margin-bottom:14px"><div style="width:420px">${escolaSelect("selEscRel", eid)}</div>
       <div class="tabs">${Object.entries({sem_cpf: "Sem CPF", sem_mae: "Sem mãe", simplificada: "Simplificada (CPF mascarado)"}).map(([k, l]) =>
         `<button class="tab ${k === tipo ? "active" : ""}" data-t="${k}">${l}</button>`).join("")}</div>
-      <span class="spacer"></span><button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="relDoc"></div>`;
+      <span class="spacer"></span>${eid ? btnXls("relatorio") : ""}<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="relDoc"></div>`;
   $("#selEscRel").onchange = ev => location.hash = `#/relatorios/${ev.target.value}?tipo=${tipo}`;
   $$(".tabs .tab").forEach(b => b.onclick = () => location.hash = `#/relatorios/${eid}?tipo=${b.dataset.t}`);
   if (!eid) { $("#relDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }
   lembrarEscola(eid);
   const d = await api(`/api/escolas/${eid}/relatorio/${tipo}`), R = RELS[tipo], e = d.escola;
+  XLS.relatorio = () => ({titulo: `${R.t} - ${e.nome}`, subtitulo: `Cód. SMTT ${e.cod_smtt || "—"}`, colunas: R.xcols, linhas: d.itens.map((a, i) => R.xrow(a, i + 1))});
   $("#relDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/api/logo" alt=""><h2>${R.t} - ${new Date().getFullYear()}</h2></div>
     <div class="dmeta"><span><b>COD:</b> ${esc(e.cod_smtt)}</span><span><b>INSTITUIÇÃO:</b> ${esc(e.nome)}</span><span><b>DATA/HORA:</b> ${agora()}</span><span><b>TOTAL:</b> ${d.itens.length}</span></div>
     ${d.itens.length ? `<table><thead><tr>${R.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>
@@ -769,12 +836,16 @@ async function orcamento(eid) {
   const cfg = await api("/api/config");
   $("#view").innerHTML = `<div class="row no-print" style="margin-bottom:14px"><div style="width:420px">${escolaSelect("selEscO", eid)}</div>
     <label style="margin:0">Preço unitário (R$)</label><input id="preco" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:110px">
-    <span class="spacer"></span><button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="orcDoc"></div>`;
+    <span class="spacer"></span>${eid ? btnXls("orcamento") : ""}<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="orcDoc"></div>`;
   $("#selEscO").onchange = ev => location.hash = "#/orcamento/" + ev.target.value;
   $("#preco").onchange = async ev => { await api("/api/config", {method: "PUT", body: {preco_unitario: ev.target.value}}); toast("Preço atualizado"); if (eid) render(await api(`/api/escolas/${eid}/orcamento`)); };
   if (!eid) { $("#orcDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }
   lembrarEscola(eid);
   const render = o => {
+    XLS.orcamento = () => ({titulo: `Orçamento - ${o.escola.nome}`, subtitulo: `Cód. SMTT ${o.escola.cod_smtt || "—"} · ${o.matriculados} matriculados com CPF · índice ${fmtPct(o.indice)}`,
+      colunas: [["Descrição"], ["Preço unitário", "moeda"], ["Qtd", "numero"], ["Valor", "moeda"]],
+      linhas: [["Alunos matriculados com CPF (migrados)", o.preco_unitario, o.migrados, o.subtotal], ["Peticionamento", "", 1, o.peticionamento],
+        ["Desconto", "", "", -o.desconto], ["Valor total", "", "", o.total]]});
     $("#orcDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/api/logo" alt=""><h2>ORÇAMENTO — MIGRAÇÃO DE ESTUDANTES (SMTT)</h2></div>
       <div class="dmeta"><span><b>INSTITUIÇÃO:</b> ${esc(o.escola.nome)}</span><span><b>COD. SMTT:</b> ${esc(o.escola.cod_smtt)}</span><span><b>DATA:</b> ${agora()}</span></div>
       <table><thead><tr><th>Matriculados com CPF</th><th>Alunos migrados</th><th>Não migrados</th><th>Índice de migração</th><th>Valor</th></tr></thead>
@@ -814,10 +885,12 @@ async function bases() {
         <div class="drop" data-base="${k}"><svg class="i"><use href="#i-upload"/></svg>Arraste ou <label style="display:inline;color:var(--accent);cursor:pointer">escolha o arquivo<input type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden></label></div></div></div>`).join("")}
     </div>
     <div id="impStatus"></div>
-    <div class="card"><div class="card-h"><h2>Histórico de importações</h2></div>
+    <div class="card"><div class="card-h"><h2>Histórico de importações</h2><span class="spacer"></span>${btnXls("hist")}</div>
       <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Quando</th><th>Base</th><th>Arquivo</th><th class="num">Linhas</th></tr></thead><tbody id="tbHist"></tbody></table></div><div id="pgHist"></div></div>`;
+  XLS.hist = () => ({titulo: "Histórico de importações", colunas: [["Quando", "datahora"], ["Base"], ["Arquivo"], ["Linhas", "numero"]],
+    linhas: d.historico.map(h => [h.importado_em, d.bases[h.base]?.label || h.base, h.arquivo, h.linhas])});
   const renderH = () => { const pg = paginar("hist", d.historico, renderH, 10);
-    $("#tbHist").innerHTML = pg.itens.map(h => `<tr><td>${esc(h.importado_em)}</td><td>${esc(d.bases[h.base]?.label || h.base)}</td><td>${esc(h.arquivo)}</td><td class="num">${fmtN(h.linhas)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">Nenhuma importação.</td></tr>`;
+    $("#tbHist").innerHTML = pg.itens.map(h => `<tr><td>${fmtDH(h.importado_em)}</td><td>${esc(d.bases[h.base]?.label || h.base)}</td><td>${esc(h.arquivo)}</td><td class="num">${fmtN(h.linhas)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">Nenhuma importação.</td></tr>`;
     $("#pgHist").innerHTML = pg.html; };
   resetPag("hist"); renderH();
   $$(".drop").forEach(dz => {
@@ -848,10 +921,13 @@ async function busca(_, qs) {
   const q = qs.get("q") || "";
   $("#buscaInput").value = q;
   const rs = q ? await api("/api/alunos/busca?q=" + encodeURIComponent(q)) : [];
-  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${rs.length ? `${fmtN(rs.length)}${rs.length === 1000 ? "+" : ""} resultado(s) para “${esc(q)}”` : q ? `Estudante não localizado: “${esc(q)}”` : "Digite um nome ou CPF na busca acima"}</h2></div>
+  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${rs.length ? `${fmtN(rs.length)}${rs.length === 1000 ? "+" : ""} resultado(s) para “${esc(q)}”` : q ? `Estudante não localizado: “${esc(q)}”` : "Digite um nome ou CPF na busca acima"}</h2>${rs.length ? `<span class="spacer"></span>${btnXls("busca")}` : ""}</div>
     ${rs.length ? `<div class="table-wrap" style="max-height:none"><table id="tbB"><thead><tr><th>Aluno</th><th>Nasc.</th><th>Instituição</th><th>Turma</th><th>Mãe</th><th>CPF (GEDUC)</th><th></th></tr></thead><tbody id="tbBBody"></tbody></table></div><div id="pgB"></div>` : ""}</div>`;
+  XLS.busca = () => ({titulo: "Localizar estudante", subtitulo: `Busca: ${q}`,
+    colunas: [["Aluno"], ["Nascimento", "data"], ["Instituição"], ["Turma"], ["Turno"], ["Mãe"], ["CPF (GEDUC)", "cpf"]],
+    linhas: rs.map(r => [r.aluno, r.dt_nasc, r.escola, r.turma, r.turno, r.mae, r.cpf_geduc])});
   const rowB = r => `<tr><td><b>${esc(r.aluno)}</b>${r.manual ? ` <span class="badge b-info">individual</span>` : ""}</td><td>${fmtData(r.dt_nasc)}</td><td>${esc(r.escola)}</td><td>${esc(r.turma)} · ${esc(r.turno)}</td><td>${esc(r.mae)}</td><td class="mono">${fmtCPF(r.cpf_geduc)}</td>
-      <td>${r.escola_id ? `<a class="btn" href="#/migracao/${r.escola_id}">Abrir instituição</a>` : `<button data-id="${esc(r.id_aluno)}">Detalhes</button>`}</td></tr>`;
+      <td>${r.escola_id ? `<a class="btn btn-sm" href="#/migracao/${r.escola_id}">Abrir instituição</a>` : `<button class="btn-sm" data-id="${esc(r.id_aluno)}">Detalhes</button>`}</td></tr>`;
   const renderB = () => { const pg = paginar("busca", rs, renderB); if ($("#tbBBody")) { $("#tbBBody").innerHTML = pg.itens.map(rowB).join(""); $("#pgB").innerHTML = pg.html; } };
   resetPag("busca"); renderB();
   const tb = $("#tbB"); if (tb) tb.onclick = ev => { const id = ev.target.dataset.id; if (id) { MIG = null; abrirAluno(id); } };
@@ -892,16 +968,23 @@ async function usuarios() {
   const [us] = [await api("/api/usuarios"), await loadEscolas()];
   const nomes = Object.fromEntries(ESCOLAS.map(e => [e.id, e.nome]));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${us.length} usuário(s)</h2><span class="spacer"></span>
-      <input id="fU" placeholder="Filtrar CPF ou instituição…" style="width:260px"><button class="primary" id="novoU">Novo usuário</button></div>
+      <input id="fU" placeholder="Filtrar CPF ou instituição…" style="width:260px">${btnXls("usuarios")}<button class="primary" id="novoU">Novo usuário</button></div>
     <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Usuário (CPF)</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
     <tbody id="tbUBody"></tbody></table></div><div id="pgU"></div></div>`;
   const rowU = x => `<tr><td class="mono"><b>${esc(fmtCPF(x.login))}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
       <td>${x.perfil === "admin" ? `<span class="badge b-info">Administrador</span>` : `<span class="badge b-mute">Instituição</span>`}</td>
       <td>${x.perfil === "admin" ? `<span class="muted">todas</span>` : x.escolas.map(id => `<div>${esc(nomes[id] || "#" + id)}${ESCOLAS.find(e => e.id === id)?.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</div>`).join("")}</td>
-      <td>${esc(x.criado_em)}</td><td><button class="btn-sm" data-u="${x.id}">Editar</button></td></tr>`;
-  const renderU = () => {
+      <td>${fmtDH(x.criado_em)}</td><td class="acoes"><button class="btn-sm" data-u="${x.id}">Editar</button></td></tr>`;
+  const filtrados = () => {
     const q = $("#fU").value.toLowerCase(), qd = q.replace(/\D/g, "");
-    const pg = paginar("usuarios", us.filter(x => x.login.includes(q) || (qd && x.login.includes(qd)) || x.escolas.some(id => (nomes[id] || "").toLowerCase().includes(q))), renderU);
+    return us.filter(x => x.login.includes(q) || (qd && x.login.includes(qd)) || x.escolas.some(id => (nomes[id] || "").toLowerCase().includes(q)));
+  };
+  XLS.usuarios = () => ({titulo: "Usuários", subtitulo: $("#fU").value && `Filtro: ${$("#fU").value}`,
+    colunas: [["Usuário (CPF)", "cpf"], ["Perfil"], ["Instituições"], ["Criado em", "datahora"]],
+    linhas: filtrados().map(x => [x.login, x.perfil === "admin" ? "Administrador" : "Instituição",
+      x.perfil === "admin" ? "Todas" : x.escolas.map(id => nomes[id] || "#" + id).join("\n"), x.criado_em])});
+  const renderU = () => {
+    const pg = paginar("usuarios", filtrados(), renderU);
     $("#tbUBody").innerHTML = pg.itens.map(rowU).join("") || `<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>`;
     $("#pgU").innerHTML = pg.html;
   };
