@@ -5,9 +5,9 @@ from pathlib import Path
 from . import db
 
 # ordem respeitando as chaves estrangeiras
-TABELAS = ["escolas", "usuarios", "usuario_escolas", "geduc", "censo", "smtt", "status_alunos", "ajustes", "alunos_manuais", "lotes",
+TABELAS = ["escolas", "representantes", "escola_cursos", "usuarios", "usuario_escolas", "geduc", "censo", "smtt", "status_alunos", "ajustes", "alunos_manuais", "lotes",
            "lote_alunos", "arquivos_finais", "arquivos_config", "config", "importacoes"]
-COM_SEQUENCIA = ["escolas", "usuarios", "geduc", "censo", "smtt", "status_alunos", "alunos_manuais", "lotes",
+COM_SEQUENCIA = ["escolas", "representantes", "escola_cursos", "usuarios", "geduc", "censo", "smtt", "status_alunos", "alunos_manuais", "lotes",
                  "arquivos_finais", "importacoes"]
 
 

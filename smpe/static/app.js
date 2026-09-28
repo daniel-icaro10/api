@@ -374,7 +374,24 @@ function camposComErro(a) {
   return s;
 }
 const TIPOS_ENSINO = ["ENSINO FUNDAMENTAL", "ENSINO MEDIO", "EDUCACAO INFANTIL", "EJA"];
-function formAluno(vals, base, erros, extra = "") {
+// cursos da instituicao (aba Cursos) ou, sem cadastro, os tipos de ensino padrao
+const cursosDa = eid => { const cs = ESCOLAS.find(e => e.id === +eid)?.cursos || []; return cs.length ? cs : TIPOS_ENSINO.map(c => ({curso: c, grau: ""})); };
+// tamanho maximo de cada campo no layout da remessa (375 colunas); endereco = rua + ", " + numero
+const LIMITES = {aluno: 50, mae: 50, pai: 50, bairro: 30, cidade: 20, matricula: 12, rg: 20, org_exp: 10};
+function contadores(f) {
+  const lim = k => k === "rua" ? 50 - (f.numero?.value.trim() ? f.numero.value.trim().length + 2 : 0) : LIMITES[k];
+  const campos = [...Object.keys(LIMITES), "rua"].map(k => f[k]).filter(Boolean);
+  const upd = () => campos.forEach(i => {
+    const box = i.closest("div"), max = lim(i.name), n = i.value.trim().length;
+    let c = box.querySelector(".cnt");
+    if (!c) { c = document.createElement("small"); c.className = "cnt"; box.querySelector("label").append(c); }
+    c.textContent = `${n}/${max}`; c.classList.toggle("over", n > max);
+    box.classList.toggle("campo-longo", n > max);
+    c.title = n > max ? `Excede ${n - max} caractere(s): o excesso é cortado na remessa. Apague o que sobrar.` : "Caracteres usados / máximo do layout";
+  });
+  f.addEventListener("input", upd); upd();
+}
+function formAluno(vals, base, erros, extra = "", cursos = cursosDa()) {
   const ph = k => base[k] ? `base: ${k === "cpf" ? fmtCPF(base[k]) : k.includes("dt") ? fmtData(base[k]) : base[k]}` : "";
   const sel = (k, ops) => `<select name="${k}"><option value="">${esc(ph(k) || "—")}</option>${ops.map(([v, l]) => `<option value="${v}" ${(vals[k] || "").toUpperCase().startsWith(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   return CAMPOS_ALUNO.map(([k, l, t, cls]) => !l ? `<h3 class="full" style="margin:8px 0 0">${k}</h3>` :
@@ -382,7 +399,7 @@ function formAluno(vals, base, erros, extra = "") {
       t === "sexo" ? sel(k, [["M", "Masculino"], ["F", "Feminino"]]) :
       t === "turno" ? sel(k, [["M", "Matutino"], ["V", "Vespertino"], ["N", "Noturno"], ["I", "Integral"]]) :
       t === "grau" ? sel(k, [["1", "1"], ["2", "2"], ["3", "3"]]) :
-      t === "curso" ? sel(k, TIPOS_ENSINO.map(v => [v, v])) :
+      t === "curso" ? sel(k, [...new Set([...cursos.map(c => c.curso), vals[k]].filter(Boolean))].map(v => [v, v])) :
       `<input name="${k}" type="${t === "date" ? "date" : "text"}" value="${esc(t === "cpf" ? fmtCPF(vals[k] || "") : vals[k] || "")}" placeholder="${esc(ph(k))}">`}</div>`).join("") + extra;
 }
 // depois de salvar: recarrega a lista (reprocessa pendencias e criticas) e reabre o aluno
@@ -394,12 +411,17 @@ async function reprocessar(id) {
   toast(a.apto ? "Reprocessado: aluno apto para a remessa" : `Reprocessado: ainda com ${a.pendencias.length} pendência(s)`);
   abrirAluno(id);
 }
+// ao escolher o curso, o grau acompanha o cadastrado na instituicao
+function grauDoCurso(f, cursos) {
+  f.curso.addEventListener("change", () => { const c = cursos.find(x => x.curso === f.curso.value); if (c?.grau) f.grau.value = c.grau; });
+}
 async function novoAluno(eid) {
   drawer(`<div class="dh"><div style="flex:1"><h2>Cadastrar aluno</h2><div class="muted">Cadastro individual, fora da base GEDUC</div></div>
       <button onclick="closeDrawer()">Fechar</button></div>
-    <div class="db"><form id="fNovo" class="form">${formAluno({cidade: "SAO LUIS", curso: "ENSINO FUNDAMENTAL", grau: "1"}, {}, new Set())}
+    <div class="db"><form id="fNovo" class="form">${formAluno({cidade: "SAO LUIS", curso: cursosDa(eid)[0].curso, grau: cursosDa(eid)[0].grau || "1"}, {}, new Set(), "", cursosDa(eid))}
       <div class="full row"><button class="primary">Cadastrar e processar</button></div></form></div>`);
   $("#fNovo [name=aluno]").required = true;
+  contadores($("#fNovo")); grauDoCurso($("#fNovo"), cursosDa(eid));
   $("#fNovo").onsubmit = async ev => {
     ev.preventDefault();
     const r = await api(`/api/escolas/${eid}/alunos`, {method: "POST", body: Object.fromEntries(new FormData(ev.target))});
@@ -411,7 +433,11 @@ async function abrirAluno(id) {
   const [d, a] = [await api(`/api/alunos/${encodeURIComponent(id)}`), MIG?.d.alunos.find(x => x.id_aluno === id)];
   const g = d.geduc, aj = d.ajuste || {}, manual = !!g.manual, erros = camposComErro(a);
   const src = (t, rows, f) => `<h3>${t}</h3>` + (rows.length ? rows.map(f).join("<hr style='border:0;border-top:1px dashed var(--line)'>") : `<p class="muted">Não encontrado nesta base (cruzamento por nome).</p>`);
-  const vals = manual ? g : aj;
+  const eidAluno = manual ? g.escola_id : MIG?.eid, cursos = cursosDa(eidAluno);
+  // valor atual de cada campo (correcao, cruzamento das bases ou GEDUC): a instituicao edita em cima dele
+  const atual = Object.fromEntries(CAMPOS_ALUNO.filter(c => c[1]).map(([k]) => [k, aj[k] || (a && k !== "cpf" ? a[k] : "") || g[k] || ""]));
+  atual.cpf = aj.cpf || (a && a.cpf !== "DIVERGENTE" ? a.cpf : "");
+  const vals = manual ? g : atual;
   drawer(`<div class="dh"><div style="flex:1"><h2>${esc(a?.aluno || g.aluno)}</h2><div class="muted">${manual ? "Cadastro individual" : esc(g.escola)} · ${esc(g.turma)} · ID ${esc(g.id_aluno)}</div>
       ${a ? `<div style="margin-top:6px">${pendBadges(a.pendencias, a.criticas)}${a.migrado ? `<span class="badge b-ok">migrado</span>` : ""}${a.apto ? `<span class="badge b-ok">apto</span>` : ""}</div>` : ""}</div>
       <button onclick="closeDrawer()">Fechar</button></div>
@@ -421,10 +447,10 @@ async function abrirAluno(id) {
         ${a.criticas.length ? `<div class="alert warn"><b>Será rejeitado pelo validador SMTT:</b><br>${a.criticas.map(x => `(${x}) ${esc(LEGENDA[x])}`).join("<br>")}
           <br><small>Corrija os campos destacados abaixo e clique em “Salvar e reprocessar”.</small></div>` : ""}` : ""}
       <h3>${manual ? "Cadastro do aluno" : "Correções da instituição"}</h3>
-      ${manual ? "" : `<p class="muted" style="margin-top:0">Preencha só o que estiver incorreto. Os campos vazios usam o valor das bases (mostrado em cinza).</p>`}
+      ${manual ? "" : `<p class="muted" style="margin-top:0">Os campos mostram a informação atual. Edite só o que estiver incorreto (por exemplo, apague os caracteres que sobram). Só os campos alterados viram correção.</p>`}
       <form id="fAj" class="form">
         ${formAluno(vals, manual ? {} : {...g, telefone: a?.telefone || "", rg: a?.rg || "", org_exp: a?.org_exp || "", data_exp: a?.data_exp || "", matricula: a?.matricula || ""}, erros,
-          manual ? "" : `<div class="full"><label>Observação</label><input name="obs" value="${esc(aj.obs || "")}"></div>`)}
+          manual ? "" : `<div class="full"><label>Observação</label><input name="obs" value="${esc(aj.obs || "")}"></div>`, cursos)}
         <div class="full row"><button class="primary">Salvar e reprocessar</button>
           ${manual ? `<button type="button" class="danger" id="excluirAluno">Excluir aluno</button>`
             : d.ajuste ? `<button type="button" class="danger" id="limparAj">Remover correções</button>` : ""}
@@ -441,9 +467,13 @@ async function abrirAluno(id) {
         <dt>Telefone</dt><dd>${esc(x.telefone) || "—"}</dd><dt>Mãe</dt><dd>${esc(x.mae) || "—"}</dd></dl>`)}
       ${d.lotes.length ? `<h3>Remessas</h3>${d.lotes.map(l => `<div>#${l.id} · ${esc(l.criado_em)} · <a href="/api/lotes/${l.id}/arquivo">${esc(l.arquivo)}</a> · <a href="/api/lotes/${l.id}/pdf">PDF</a></div>`).join("")}` : ""}
     </div>`);
-  $("#fAj").onsubmit = async ev => {
+  const fAj = $("#fAj"), inicial = Object.fromEntries(new FormData(fAj));
+  contadores(fAj); grauDoCurso(fAj, cursos);
+  fAj.onsubmit = async ev => {
     ev.preventDefault();
-    const body = Object.fromEntries(new FormData(ev.target));
+    let body = Object.fromEntries(new FormData(ev.target));
+    // campo sem alteracao e sem correcao anterior continua vindo das bases
+    if (!manual) body = Object.fromEntries(Object.entries(body).map(([k, v]) => [k, k === "obs" || v !== inicial[k] || aj[k] ? v : ""]));
     if (manual) await api(`/api/alunos-manuais/${g.id}`, {method: "PUT", body});
     else await api(`/api/alunos/${encodeURIComponent(id)}/ajuste`, {method: "PUT", body});
     reprocessar(id);
@@ -531,33 +561,71 @@ async function bloqueioEscola(id) {
     closeModal(); toast("Acesso bloqueado"); escolas();
   };
 }
+// formulario da instituicao em abas: dados cadastrais, representantes (varios) e cursos (varios)
+const TURNOS = [["M", "Matutino"], ["V", "Vespertino"], ["N", "Noturno"], ["I", "Integral"]];
+const repRow = (r = {}) => `<div class="sub-row rep-row"><div class="form">
+    <div class="full"><label>Nome</label><input data-k="nome" value="${esc(r.nome || "")}" required></div>
+    <div><label>CPF</label><input data-k="cpf" value="${esc(fmtCPF(r.cpf || ""))}" inputmode="numeric"></div>
+    <div><label>Cargo / função</label><input data-k="cargo" value="${esc(r.cargo || "")}" placeholder="Ex.: Gestor(a), Secretário(a)"></div>
+    <div><label>Contato</label><input data-k="contato" value="${esc(r.contato || "")}" placeholder="(98) 90000-0000"></div>
+    <div><label>E-mail</label><input data-k="email" type="email" value="${esc(r.email || "")}"></div>
+  </div><button type="button" class="btn-sm danger sub-del">Remover</button></div>`;
+const cursoRow = (c = {}) => `<div class="sub-row curso-row"><div class="form">
+    <div><label>Curso / tipo de ensino</label><input data-k="curso" list="dlCursos" maxlength="25" value="${esc(c.curso || "")}" required></div>
+    <div><label>Grau</label><select data-k="grau">${["1", "2", "3"].map(g => `<option ${(c.grau || "1") === g ? "selected" : ""}>${g}</option>`).join("")}</select></div>
+    <div><label>Séries / períodos</label><input data-k="series" value="${esc(c.series || "")}" placeholder="Ex.: 1 a 9"></div>
+    <div><label>Turnos</label><div class="turnos">${TURNOS.map(([v, l]) => `<label><input type="checkbox" value="${v}" ${(c.turnos || "").split(",").includes(v) ? "checked" : ""}>${l}</label>`).join("")}</div></div>
+  </div><button type="button" class="btn-sm danger sub-del">Remover</button></div>`;
 async function editarEscola(id) {
-  const e = ESCOLAS.find(x => x.id === id) || {nome: "", cod_smtt: "", inep: "", geduc_nome: "", nivel: "ENSINO FUNDAMENTAL"};
+  const e = ESCOLAS.find(x => x.id === id) || {nome: "", cod_smtt: "", inep: "", geduc_nome: "", nivel: "ENSINO FUNDAMENTAL", representantes: [], cursos: []};
   const sug = e.nome ? await api("/api/geduc/escolas?sugerir_para=" + encodeURIComponent(e.nome)) : await api("/api/geduc/escolas");
+  const abas = [["dados", "Dados cadastrais"], ["reps", "Representantes"], ["cursos", "Cursos"]];
   modal(`<div class="mh"><h2>${id ? "Editar instituição" : "Nova instituição"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
-    <form id="fEsc"><div class="mb form">
-      <div><label>ID</label><input name="id" type="number" value="${id ?? ""}" ${id ? "disabled" : ""} placeholder="automático"></div>
-      <div><label>Nível de ensino (campo CURSO da remessa)</label><input name="nivel" value="${esc(e.nivel)}"></div>
-      <div class="full"><label>Nome da instituição</label><input name="nome" required value="${esc(e.nome)}"></div>
-      <div><label>Código SMTT (4 dígitos)</label><input name="cod_smtt" value="${esc(e.cod_smtt)}" maxlength="4"></div>
-      <div><label>Código INEP</label><input name="inep" value="${esc(e.inep)}"></div>
-      <div><label>CNPJ</label><input name="cnpj" value="${esc(fmtCNPJ(e.cnpj))}" inputmode="numeric" placeholder="00.000.000/0000-00"></div>
-      <div><label>E-mail</label><input name="email" type="email" value="${esc(e.email || "")}"></div>
-      <div class="full"><label>Vínculo com o GEDUC (nome da instituição na base GEDUC)</label>
-        <select name="geduc_nome"><option value="">Usar o mesmo nome do cadastro</option>${sug.slice(0, 400).map(s =>
-          `<option value="${esc(s.escola)}" ${s.escola.trim() === (e.geduc_nome || "").trim() ? "selected" : ""}>${esc(s.escola)} — ${fmtN(s.alunos)} alunos${s.similaridade != null ? ` (${Math.round(s.similaridade * 100)}%)` : ""}</option>`).join("")}</select>
-        <small class="muted">Ordenado por semelhança com o nome. Também cruza pelo INEP, se informado.</small></div>
-      <h3 class="full" style="margin:8px 0 0">Informações do(a) gestor(a)</h3>
-      <div class="full"><label>Nome</label><input name="gestor_nome" value="${esc(e.gestor_nome || "")}"></div>
-      <div><label>CPF</label><input name="gestor_cpf" value="${esc(fmtCPF(e.gestor_cpf || ""))}" inputmode="numeric"></div>
-      <div><label>Contato</label><input name="gestor_contato" value="${esc(e.gestor_contato || "")}" placeholder="(98) 90000-0000"></div>
-      <div class="full"><label>E-mail do(a) gestor(a)</label><input name="gestor_email" type="email" value="${esc(e.gestor_email || "")}"></div>
+    <form id="fEsc"><div class="mb">
+      <div class="tabs" id="escTabs" style="margin-bottom:16px">${abas.map(([k, l], i) => `<button type="button" class="tab ${i ? "" : "active"}" data-aba="${k}">${l} <span class="n" data-n="${k}"></span></button>`).join("")}</div>
+      <div class="form" data-pane="dados">
+        <div><label>ID</label><input name="id" type="number" value="${id ?? ""}" ${id ? "disabled" : ""} placeholder="automático"></div>
+        <div><label>Curso padrão (campo CURSO da remessa)</label><input name="nivel" list="dlCursos" maxlength="25" value="${esc(e.nivel)}"></div>
+        <div class="full"><label>Nome da instituição</label><input name="nome" required value="${esc(e.nome)}"></div>
+        <div><label>Código SMTT (4 dígitos)</label><input name="cod_smtt" value="${esc(e.cod_smtt)}" maxlength="4"></div>
+        <div><label>Código INEP</label><input name="inep" value="${esc(e.inep)}"></div>
+        <div><label>CNPJ</label><input name="cnpj" value="${esc(fmtCNPJ(e.cnpj))}" inputmode="numeric" placeholder="00.000.000/0000-00"></div>
+        <div><label>E-mail</label><input name="email" type="email" value="${esc(e.email || "")}"></div>
+        <div class="full"><label>Vínculo com o GEDUC (nome da instituição na base GEDUC)</label>
+          <select name="geduc_nome"><option value="">Usar o mesmo nome do cadastro</option>${sug.slice(0, 400).map(s =>
+            `<option value="${esc(s.escola)}" ${s.escola.trim() === (e.geduc_nome || "").trim() ? "selected" : ""}>${esc(s.escola)} — ${fmtN(s.alunos)} alunos${s.similaridade != null ? ` (${Math.round(s.similaridade * 100)}%)` : ""}</option>`).join("")}</select>
+          <small class="muted">Ordenado por semelhança com o nome. Também cruza pelo INEP, se informado.</small></div>
+      </div>
+      <div data-pane="reps" hidden>
+        <p class="muted" style="margin-top:0">Pessoas que respondem pela instituição (gestor, secretário, responsável pelo transporte…).</p>
+        <div id="repList">${(e.representantes || []).map(repRow).join("")}</div>
+        <button type="button" id="addRep">+ Adicionar representante</button>
+      </div>
+      <div data-pane="cursos" hidden>
+        <p class="muted" style="margin-top:0">Cursos oferecidos. Aparecem como opções de <b>Tipo de ensino</b> no cadastro e na correção dos alunos desta instituição.</p>
+        <div id="cursoList">${(e.cursos || []).map(cursoRow).join("")}</div>
+        <button type="button" id="addCurso">+ Adicionar curso</button>
+      </div>
+      <datalist id="dlCursos">${TIPOS_ENSINO.map(t => `<option value="${t}">`).join("")}</datalist>
     </div>
     <div class="mf">${id ? `<button type="button" class="danger" id="delEsc">Excluir</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
-  $("#fEsc").onsubmit = async ev => {
+  const f = $("#fEsc");
+  const contar = () => { $("[data-n=reps]", f).textContent = $$(".rep-row", f).length || ""; $("[data-n=cursos]", f).textContent = $$(".curso-row", f).length || ""; };
+  const mostrar = k => { $$("[data-pane]", f).forEach(p => p.hidden = p.dataset.pane !== k); $$("#escTabs .tab", f).forEach(b => b.classList.toggle("active", b.dataset.aba === k)); };
+  $("#escTabs").onclick = ev => { const b = ev.target.closest("[data-aba]"); if (b) mostrar(b.dataset.aba); };
+  // campo obrigatorio em aba escondida: abre a aba para o navegador mostrar o aviso
+  f.addEventListener("invalid", ev => { const p = ev.target.closest("[data-pane]"); if (p?.hidden) { mostrar(p.dataset.pane); setTimeout(() => ev.target.reportValidity()); } }, true);
+  $("#addRep").onclick = () => { $("#repList").insertAdjacentHTML("beforeend", repRow()); contar(); $("#repList .rep-row:last-child input").focus(); };
+  $("#addCurso").onclick = () => { $("#cursoList").insertAdjacentHTML("beforeend", cursoRow()); contar(); $("#cursoList .curso-row:last-child input").focus(); };
+  f.addEventListener("click", ev => { if (ev.target.matches(".sub-del")) { ev.target.closest(".sub-row").remove(); contar(); } });
+  contar();
+  const campos = row => Object.fromEntries($$("[data-k]", row).map(i => [i.dataset.k, i.value]));
+  f.onsubmit = async ev => {
     ev.preventDefault();
-    const f = Object.fromEntries(new FormData(ev.target));
-    const body = {...e, ...f, id: id || (f.id ? +f.id : null)};
+    const d = Object.fromEntries(new FormData(f));
+    const representantes = $$(".rep-row", f).map(campos);
+    const cursos = $$(".curso-row", f).map(row => ({...campos(row), turnos: $$(".turnos input:checked", row).map(x => x.value).join(",")}));
+    const body = {...e, ...d, id: id || (d.id ? +d.id : null), representantes, cursos};
     if (id) await api(`/api/escolas/${id}`, {method: "PUT", body}); else await api("/api/escolas", {method: "POST", body});
     closeModal(); toast("Instituição salva"); escolas();
   };

@@ -4,7 +4,7 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 
 ## Como usar
 
-1. Dê dois cliques em `abrir.bat`. O sistema abre em http://127.0.0.1:8010.
+1. Dê dois cliques em `abrir.bat`. Ele instala as dependências que faltarem e abre o sistema em http://127.0.0.1:8010.
 2. No primeiro acesso, informe o CPF e crie a senha do **administrador**.
 3. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`, `.xls` ou `.csv`). O cabeçalho pode estar em qualquer uma das primeiras 50 linhas e em qualquer aba do arquivo.
 4. Em **Instituições**, confira o **vínculo GEDUC** das instituições marcadas "0 — vincular", que são as que têm nome diferente no GEDUC. Em **Usuários**, crie os logins e vincule cada um a uma ou mais instituições.
@@ -31,7 +31,7 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 | Planilha | Sistema |
 |---|---|
 | MENU / botão "Localizar Estudante" | Painel + busca no topo, por nome ou CPF (a instituição busca só nos próprios alunos) |
-| CAD_ESCOLA | Instituições: cadastro com código SMTT, INEP, CNPJ, e-mail, dados do(a) gestor(a) (nome, CPF, contato e e-mail), vínculo GEDUC, acesso e bloqueio |
+| CAD_ESCOLA | Instituições: cadastro em abas. **Dados cadastrais** (código SMTT, INEP, CNPJ, e-mail, curso padrão, vínculo GEDUC), **Representantes** (um ou mais: nome, CPF, cargo, contato e e-mail) e **Cursos** (um ou mais: curso, grau, séries e turnos). Também tem acesso e bloqueio |
 | ESCOLA (filtro avançado + colunas AG:AO) | Matriculado: cruzamento GEDUC × Censo × SMTT × Status e CPF consolidado |
 | Botões CPF divergente / com CPF / sem CPF / duplicado / mãe não informada | Abas de filtro do Matriculado |
 | REL_SEM_CPF / REL_SEM_MAE / REL_SIMPLIFICADA | Relatórios para imprimir (o simplificado mostra o CPF mascarado) |
@@ -56,8 +56,8 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 - CPF repetido entre alunos da mesma escola marcado como **CPF duplicado**.
 - Histórico de remessas. Cada aluno enviado fica marcado como migrado, e o orçamento conta os migrados reais.
 - **Mãe sem sobrenome**: o nome da mãe precisa ter nome e sobrenome (partículas como DA, DE e DOS não contam). O aluno sem isso não fica apto e, no arquivo, recebe a crítica 18.
-- **Correção e reprocessamento**: a instituição corrige qualquer campo do aluno (nome, CPF, mãe, pai, sexo, nascimento, série, turno, turma, matrícula, endereço, CEP, telefone e documentos). Os campos com problema aparecem destacados, e o aluno é reprocessado ao salvar.
-- **Cadastro individual**: a instituição cadastra, edita e exclui alunos que não estão no GEDUC (botão **Cadastrar aluno** no Matriculado). O formulário tem **Tipo de ensino** (campo CURSO da remessa, padrão Ensino Fundamental) e **Grau** (1, 2 ou 3). Esses alunos passam pelas mesmas regras e entram na remessa normalmente.
+- **Correção e reprocessamento**: a instituição corrige qualquer campo do aluno (nome, CPF, mãe, pai, sexo, nascimento, série, turno, turma, matrícula, endereço, CEP, telefone e documentos). Os campos já vêm preenchidos com a informação atual, e a instituição só edita o que está errado (por exemplo, apaga os caracteres que sobram no endereço). Só os campos alterados viram correção. Os campos com limite no layout da remessa mostram um contador de caracteres, que fica vermelho quando o texto passa do tamanho e seria cortado. Os campos com problema aparecem destacados, e o aluno é reprocessado ao salvar.
+- **Cadastro individual**: a instituição cadastra, edita e exclui alunos que não estão no GEDUC (botão **Cadastrar aluno** no Matriculado). O formulário tem **Tipo de ensino** (campo CURSO da remessa) e **Grau** (1, 2 ou 3). As opções de Tipo de ensino são os cursos cadastrados na instituição, e o grau acompanha o do curso escolhido. Sem cursos cadastrados, a lista usa Ensino Fundamental, Ensino Médio, Educação Infantil e EJA. Esses alunos passam pelas mesmas regras e entram na remessa normalmente.
 - **Telefone**: vem da correção, do GEDUC (coluna `TELEFONE`), da base Alunos por status ou do SMTT, nessa ordem. O sistema usa o primeiro número válido do campo e completa o DDD 98 quando falta.
 - **CEP**: vem do GEDUC (coluna `CEP` ou `CEP_ALUNO`), a menos que a instituição corrija. Sem CEP, a remessa usa 65000000.
 - **Orçamento só com CPF**: a base do orçamento é o total de matriculados com CPF consolidado, e só contam os migrados com CPF.

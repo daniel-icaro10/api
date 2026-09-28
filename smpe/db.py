@@ -20,6 +20,19 @@ CREATE TABLE IF NOT EXISTS escolas (
     desconto REAL DEFAULT 0
 );
 
+-- Representantes da instituicao (gestor, secretario...) e cursos oferecidos
+CREATE TABLE IF NOT EXISTS representantes (
+    id INTEGER PRIMARY KEY,
+    escola_id INTEGER NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+    nome TEXT NOT NULL, cpf TEXT DEFAULT '', cargo TEXT DEFAULT '', contato TEXT DEFAULT '', email TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS escola_cursos (
+    id INTEGER PRIMARY KEY,
+    escola_id INTEGER NOT NULL REFERENCES escolas(id) ON DELETE CASCADE,
+    curso TEXT NOT NULL,              -- campo CURSO da remessa (tipo de ensino)
+    grau TEXT DEFAULT '1', series TEXT DEFAULT '', turnos TEXT DEFAULT ''
+);
+
 -- Base GEDUC: todos os alunos da rede
 CREATE TABLE IF NOT EXISTS geduc (
     id INTEGER PRIMARY KEY,
@@ -153,6 +166,17 @@ COLUNAS_NOVAS = [("lotes", "num_remessa", "INTEGER"), ("escolas", "bloqueado", "
 
 
 
+def _migra_gestor(con):
+    """Gestor(a) cadastrado nos campos da versao anterior passa a ser o primeiro representante."""
+    with con:
+        con.execute("""INSERT INTO representantes (escola_id, nome, cpf, cargo, contato, email)
+                       SELECT id, gestor_nome, COALESCE(gestor_cpf,''), 'GESTOR(A)', COALESCE(gestor_contato,''),
+                              COALESCE(gestor_email,'') FROM escolas
+                       WHERE COALESCE(gestor_nome,'') <> '' AND id NOT IN (SELECT escola_id FROM representantes)""")
+        con.execute("""UPDATE escolas SET gestor_nome='', gestor_cpf='', gestor_contato='', gestor_email=''
+                       WHERE COALESCE(gestor_nome,'') <> ''""")
+
+
 def _migra_vinculos(con):
     """Usuarios da versao com um login por instituicao passam para a tabela de vinculos."""
     with con:
@@ -245,6 +269,7 @@ def _connect_pg() -> PgConnection:
                 for t, c, tipo in COLUNAS_NOVAS:
                     con.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {c} {tipo}")
                 _migra_vinculos(con)
+                _migra_gestor(con)
                 _schema_ok = True
     return con
 
@@ -262,6 +287,7 @@ def connect():
         if c not in {r[1] for r in con.execute(f"PRAGMA table_info({t})")}:
             con.execute(f"ALTER TABLE {t} ADD COLUMN {c} {tipo}")
     _migra_vinculos(con)
+    _migra_gestor(con)
     return con
 
 

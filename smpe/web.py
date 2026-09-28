@@ -7,6 +7,7 @@ import re
 import secrets
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -375,43 +376,127 @@ class EscolaIn(BaseModel):
     desconto: float = 0
     cnpj: str | None = ""
     email: str | None = ""
-    gestor_nome: str | None = ""
-    gestor_cpf: str | None = ""
-    gestor_contato: str | None = ""
-    gestor_email: str | None = ""
+    representantes: list["RepresentanteIn"] | None = None  # None = mantem os atuais
+    cursos: list["CursoIn"] | None = None
 
+
+class RepresentanteIn(BaseModel):
+    nome: str = ""
+    cpf: str | None = ""
+    cargo: str | None = ""
+    contato: str | None = ""
+    email: str | None = ""
+
+
+class CursoIn(BaseModel):
+    curso: str = ""
+    grau: str | None = "1"
+    series: str | None = ""
+    turnos: str | None = ""
+
+
+EscolaIn.model_rebuild()
 
 ESCOLA_COLS = ("nome", "cod_smtt", "inep", "geduc_nome", "nivel", "matriculados_info", "peticionamento", "desconto",
-               "cnpj", "email", "gestor_nome", "gestor_cpf", "gestor_contato", "gestor_email")
+               "cnpj", "email")
+REP_COLS = ("nome", "cpf", "cargo", "contato", "email")
+CURSO_COLS = ("curso", "grau", "series", "turnos")
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
+def _limpo(m: BaseModel) -> dict:
+    """Campos de texto sem espacos nas pontas (None vira ''); numeros e listas ficam como vieram."""
+    texto = {k for k, f in type(m).model_fields.items() if f.annotation in (str, str | None)}
+    return {k: (v or "").strip() if k in texto else v for k, v in m.model_dump().items()}
+
+
 def _escola_vals(e: EscolaIn) -> list:
-    d = {k: (v or "").strip() if k in ESCOLA_COLS[8:] or isinstance(v, str) else v for k, v in e.model_dump().items()}
+    d = _limpo(e)
     if not d["nome"]:
         raise HTTPException(400, "Informe o nome da instituição")
-    d["cnpj"], d["gestor_cpf"] = so_digitos(d["cnpj"]), so_digitos(d["gestor_cpf"])
-    d["gestor_nome"] = d["gestor_nome"].upper()
+    d["cnpj"] = so_digitos(d["cnpj"])
     if d["cnpj"] and len(d["cnpj"]) != 14:
         raise HTTPException(400, "CNPJ deve ter 14 dígitos")
-    if d["gestor_cpf"] and not cpf_valido(d["gestor_cpf"]):
-        raise HTTPException(400, "CPF do(a) gestor(a) inválido")
-    for k, nome in (("email", "E-mail da instituição"), ("gestor_email", "E-mail do(a) gestor(a)")):
-        if d[k] and not EMAIL_RE.fullmatch(d[k]):
-            raise HTTPException(400, f"{nome} inválido")
+    if d["email"] and not EMAIL_RE.fullmatch(d["email"]):
+        raise HTTPException(400, "E-mail da instituição inválido")
     return [d[c] for c in ESCOLA_COLS]
+
+
+def _representantes(e: EscolaIn) -> list[list] | None:
+    if e.representantes is None:
+        return None
+    out = []
+    for i, r in enumerate(e.representantes, 1):
+        d = _limpo(r)
+        if not any(d.values()):
+            continue
+        d["nome"], d["cargo"], d["cpf"] = d["nome"].upper(), d["cargo"].upper(), so_digitos(d["cpf"])
+        if not d["nome"]:
+            raise HTTPException(400, f"Representante {i}: informe o nome")
+        if d["cpf"] and not cpf_valido(d["cpf"]):
+            raise HTTPException(400, f"Representante {d['nome']}: CPF inválido")
+        if d["email"] and not EMAIL_RE.fullmatch(d["email"]):
+            raise HTTPException(400, f"Representante {d['nome']}: e-mail inválido")
+        out.append([d[c] for c in REP_COLS])
+    return out
+
+
+def _cursos(e: EscolaIn) -> list[list] | None:
+    if e.cursos is None:
+        return None
+    out = []
+    for i, c in enumerate(e.cursos, 1):
+        d = _limpo(c)
+        if not d["curso"] and not d["series"]:
+            continue
+        d["curso"], d["turnos"] = d["curso"].upper(), d["turnos"].upper()
+        if not d["curso"]:
+            raise HTTPException(400, f"Curso {i}: informe o nome do curso")
+        if len(d["curso"]) > 25:
+            raise HTTPException(400, f"Curso {d['curso']}: máximo de 25 caracteres (tamanho do campo CURSO da remessa)")
+        if d["grau"] not in ("1", "2", "3"):
+            raise HTTPException(400, f"Curso {d['curso']}: grau deve ser 1, 2 ou 3")
+        out.append([d[c] for c in CURSO_COLS])
+    return out
+
+
+def _grava_filhos(con, eid: int, reps: list | None, cursos: list | None):
+    if reps is not None:
+        con.execute("DELETE FROM representantes WHERE escola_id=?", (eid,))
+        con.executemany(f"INSERT INTO representantes (escola_id, {', '.join(REP_COLS)}) VALUES (?,?,?,?,?,?)",
+                        [(eid, *r) for r in reps])
+    if cursos is not None:
+        con.execute("DELETE FROM escola_cursos WHERE escola_id=?", (eid,))
+        con.executemany(f"INSERT INTO escola_cursos (escola_id, {', '.join(CURSO_COLS)}) VALUES (?,?,?,?,?)",
+                        [(eid, *c) for c in cursos])
+
+
+def _com_filhos(con, rows) -> list[dict]:
+    """Instituicoes com os representantes e cursos."""
+    escolas = [dict(r) for r in rows]
+    reps, cursos = {}, {}
+    for r in con.execute("SELECT * FROM representantes ORDER BY id"):
+        reps.setdefault(r["escola_id"], []).append({c: r[c] for c in REP_COLS})
+    for r in con.execute("SELECT * FROM escola_cursos ORDER BY id"):
+        cursos.setdefault(r["escola_id"], []).append({c: r[c] for c in CURSO_COLS})
+    for e in escolas:
+        for k in ("gestor_nome", "gestor_cpf", "gestor_contato", "gestor_email"):  # migrados para representantes
+            e.pop(k, None)
+        e["representantes"], e["cursos"] = reps.get(e["id"], []), cursos.get(e["id"], [])
+    return escolas
 
 
 @app.get("/api/escolas")
 def listar_escolas(u: dict = Depends(usuario)):
     con = db.connect()
     if not _eh_admin(u):
-        return [dict(r) for r in con.execute("SELECT * FROM escolas WHERE id=?", (u["escola_id"],))]
+        return _com_filhos(con, con.execute("SELECT * FROM escolas WHERE id=?", (u["escola_id"],)))
     logins = {}
     for r in con.execute("""SELECT ue.escola_id, us.login FROM usuario_escolas ue
                             JOIN usuarios us ON us.id = ue.usuario_id ORDER BY us.login"""):
         logins.setdefault(r["escola_id"], []).append(r["login"])
-    return [{**dict(r), "logins": logins.get(r["id"], [])} for r in con.execute("SELECT * FROM escolas ORDER BY id")]
+    return [{**e, "logins": logins.get(e["id"], [])}
+            for e in _com_filhos(con, con.execute("SELECT * FROM escolas ORDER BY id"))]
 
 
 @app.post("/api/escolas")
@@ -420,10 +505,11 @@ def criar_escola(e: EscolaIn, u: dict = Depends(admin)):
     eid = e.id or (con.execute("SELECT COALESCE(MAX(id),0)+1 FROM escolas").fetchone()[0])
     if con.execute("SELECT 1 FROM escolas WHERE id=?", (eid,)).fetchone():
         raise HTTPException(400, f"Já existe instituição com ID {eid}")
-    vals = _escola_vals(e)
+    vals, reps, cursos = _escola_vals(e), _representantes(e), _cursos(e)
     with con:
         con.execute(f"""INSERT INTO escolas (id, {', '.join(ESCOLA_COLS)})
                         VALUES ({', '.join('?' * (len(ESCOLA_COLS) + 1))})""", (eid, *vals))
+        _grava_filhos(con, eid, reps, cursos)
     return {"id": eid}
 
 
@@ -431,9 +517,10 @@ def criar_escola(e: EscolaIn, u: dict = Depends(admin)):
 def editar_escola(eid: int, e: EscolaIn, u: dict = Depends(admin)):
     con = db.connect()
     _escola(con, eid)
-    vals = _escola_vals(e)
+    vals, reps, cursos = _escola_vals(e), _representantes(e), _cursos(e)
     with con:
         con.execute(f"UPDATE escolas SET {', '.join(f'{c}=?' for c in ESCOLA_COLS)} WHERE id=?", (*vals, eid))
+        _grava_filhos(con, eid, reps, cursos)
     return {"ok": True}
 
 
@@ -994,7 +1081,8 @@ async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: di
                 n = importer.save(con, base, recs, nome)
                 _import["msg"].append(f"{importer.LABELS[base]}: {n} linhas")
         except Exception as ex:
-            _import["erro"] = str(ex)
+            traceback.print_exc()
+            _import["erro"] = str(ex) if isinstance(ex, ValueError) else f"{type(ex).__name__}: {ex}"
         finally:
             _import["rodando"] = False
 
