@@ -21,6 +21,7 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 - O nome da instituição ativa aparece no canto superior direito. Quem tem mais de uma instituição troca a ativa pelo menu desse canto, que também tem alterar senha e sair.
 - **Bloqueio**: em Instituições, o botão **Bloquear** impede o acesso à instituição (por exemplo, por pendência de pagamento). O usuário vinculado a outras instituições continua entrando nelas; quem só tem instituições bloqueadas vê o motivo na tela de login e é desconectado na próxima ação.
 - O administrador também pode ser criado pelas variáveis `SMPE_ADMIN_LOGIN` e `SMPE_ADMIN_SENHA`, quando o banco ainda não tem nenhum usuário.
+- **Recuperação de acesso**: defina `SMPE_RESET_LOGIN` (e-mail) e `SMPE_RESET_SENHA` (nova senha, mínimo 6 caracteres) e reinicie o sistema. Ele cria esse administrador ou redefine a senha dele, se já existir. Depois de entrar, apague as duas variáveis, porque enquanto elas existirem a senha volta a ser redefinida a cada reinício.
 - O usuário é o **e-mail** (maiúsculas e minúsculas não fazem diferença). Todo usuário novo, inclusive o primeiro administrador, precisa ter um e-mail válido. Logins antigos (CPF ou outro formato) continuam funcionando até o administrador trocá-los pelo e-mail em **Usuários**.
 - A sessão termina quando o navegador é fechado e dura no máximo 12 horas. As senhas são guardadas com hash PBKDF2.
 

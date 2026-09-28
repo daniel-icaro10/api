@@ -1,5 +1,6 @@
 """API + telas do SIS SMPE."""
 import difflib
+from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import os
@@ -18,7 +19,13 @@ from pydantic import BaseModel
 from . import critica, db, exportar, importer, logic, pdf
 from .util import cpf_valido, norm_cpf, norm_nome, so_digitos
 
-app = FastAPI(title="SIS SMPE")
+@asynccontextmanager
+async def _ciclo(_app):
+    _recupera_admin()
+    yield
+
+
+app = FastAPI(title="SIS SMPE", lifespan=_ciclo)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _import = {"rodando": False, "msg": [], "erro": None}
@@ -82,6 +89,29 @@ def _admin_inicial(con):
     if login and senha and not con.execute("SELECT 1 FROM usuarios LIMIT 1").fetchone():
         with con:
             con.execute("INSERT INTO usuarios (login, senha_hash, perfil) VALUES (?,?,'admin')", (login, _hash(senha)))
+
+
+def _recupera_admin():
+    """Recuperacao de acesso: com SMPE_RESET_LOGIN e SMPE_RESET_SENHA definidas (ex.: no Render), cria esse
+    administrador ou redefine a senha dele ao iniciar. Depois de entrar, apague as duas variaveis."""
+    login = _norm_login(os.environ.get("SMPE_RESET_LOGIN", ""))
+    senha = os.environ.get("SMPE_RESET_SENHA", "")
+    if not (login or senha):
+        return
+    if not _email_ok(login) or len(senha) < 6:
+        print("SMPE_RESET_LOGIN deve ser um e-mail e SMPE_RESET_SENHA ter ao menos 6 caracteres; recuperação ignorada")
+        return
+    con = db.connect()
+    r = con.execute("SELECT id FROM usuarios WHERE login=?", (login,)).fetchone()
+    with con:
+        if r:
+            con.execute("UPDATE usuarios SET senha_hash=?, perfil='admin' WHERE id=?", (_hash(senha), r["id"]))
+            con.execute("DELETE FROM sessoes WHERE usuario_id=?", (r["id"],))
+            con.execute("DELETE FROM usuario_escolas WHERE usuario_id=?", (r["id"],))
+        else:
+            con.execute("INSERT INTO usuarios (login, senha_hash, perfil) VALUES (?,?,'admin')", (login, _hash(senha)))
+    print(f"Recuperação de acesso: administrador {login} {'com senha redefinida' if r else 'criado'}. "
+          "Apague SMPE_RESET_LOGIN e SMPE_RESET_SENHA.")
 
 
 def _bloqueio_msg(motivo: str) -> str:
