@@ -5,7 +5,7 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 ## Como usar
 
 1. Dê dois cliques em `abrir.bat`. Ele instala as dependências que faltarem e abre o sistema em http://127.0.0.1:8010.
-2. No primeiro acesso, informe o CPF e crie a senha do **administrador**.
+2. No primeiro acesso, informe o e-mail e crie a senha do **administrador**.
 3. Em **Bases e importação**, envie a planilha `.xlsm` completa ou cada base separada (`.xlsx`, `.xls` ou `.csv`). O cabeçalho pode estar em qualquer uma das primeiras 50 linhas e em qualquer aba do arquivo.
 4. Em **Instituições**, confira o **vínculo GEDUC** das instituições marcadas "0 — vincular", que são as que têm nome diferente no GEDUC. Em **Usuários**, crie os logins e vincule cada um a uma ou mais instituições.
 5. Em **Matriculado**, escolha a instituição, filtre as pendências e clique em **Corrigir** para editar a informação incorreta. Ao salvar, o aluno é reprocessado na hora. Depois selecione os aptos e clique em **Gerar remessa SMTT**.
@@ -21,7 +21,7 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 - O nome da instituição ativa aparece no canto superior direito. Quem tem mais de uma instituição troca a ativa pelo menu desse canto, que também tem alterar senha e sair.
 - **Bloqueio**: em Instituições, o botão **Bloquear** impede o acesso à instituição (por exemplo, por pendência de pagamento). O usuário vinculado a outras instituições continua entrando nelas; quem só tem instituições bloqueadas vê o motivo na tela de login e é desconectado na próxima ação.
 - O administrador também pode ser criado pelas variáveis `SMPE_ADMIN_LOGIN` e `SMPE_ADMIN_SENHA`, quando o banco ainda não tem nenhum usuário.
-- O usuário é o **CPF**, guardado só com os números. No login, o CPF pode ser digitado com ou sem ponto e traço. Logins antigos que não são CPF continuam funcionando, mas todo usuário novo precisa ter CPF válido.
+- O usuário é o **e-mail** (maiúsculas e minúsculas não fazem diferença). Todo usuário novo, inclusive o primeiro administrador, precisa ter um e-mail válido. Logins antigos (CPF ou outro formato) continuam funcionando até o administrador trocá-los pelo e-mail em **Usuários**.
 - A sessão termina quando o navegador é fechado e dura no máximo 12 horas. As senhas são guardadas com hash PBKDF2.
 
 Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2026.4.xlsm"`

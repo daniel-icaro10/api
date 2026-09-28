@@ -7,6 +7,7 @@ const fmtPct = n => ((n || 0) * 100).toLocaleString("pt-BR", {maximumFractionDig
 const fmtBRL = n => (n || 0).toLocaleString("pt-BR", {style: "currency", currency: "BRL"});
 const fmtData = d => d ? d.slice(0, 10).split("-").reverse().join("/") : "";
 const fmtCNPJ = c => c && c.length === 14 ? `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}` : (c || "");
+const fmtLogin = l => /^\d{11}$/.test(l || "") ? fmtCPF(l) : (l || "");
 const fmtCPF = c => c && c.length === 11 ? `${c.slice(0,3)}.${c.slice(3,6)}.${c.slice(6,9)}-${c.slice(9)}` : (c || "");
 const agora = () => new Date().toLocaleString("pt-BR");
 const fmtDH = s => s ? fmtData(s) + (s.length > 10 ? " " + s.slice(11, 16) : "") : "";  // "AAAA-MM-DD HH:MM:SS" -> "DD/MM/AAAA HH:MM"
@@ -64,7 +65,7 @@ function mostrarLogin(msg = "") {
   SESSAO = null; ESCOLAS = [];
   const setup = !!PUBLICO.precisa_setup;
   $("#loginTitulo").textContent = setup ? "Primeiro acesso" : "Entrar";
-  $("#loginSub").textContent = setup ? "Informe o CPF e crie a senha do administrador do sistema." : "Acesse com o seu CPF e a sua senha.";
+  $("#loginSub").textContent = setup ? "Informe o e-mail e crie a senha do administrador do sistema." : "Acesse com o seu e-mail e a sua senha.";
   $("#loginConf").hidden = !setup; $("#loginConf input").required = setup;
   $("#loginBtn").textContent = setup ? "Criar administrador" : "Entrar";
   $("#loginMsg").textContent = msg; $("#loginMsg").hidden = !msg;
@@ -84,7 +85,7 @@ function entrar() {
   document.body.classList.toggle("inst", !ehAdmin());
   const nome = ehAdmin() ? "Administrador" : SESSAO.escola_nome;
   $("#userNome").textContent = nome; $("#userNome").title = nome;
-  $("#userPerfil").textContent = ehAdmin() ? `${fmtCPF(SESSAO.login)} · acesso total` : `Instituição · ${fmtCPF(SESSAO.login)}`;
+  $("#userPerfil").textContent = ehAdmin() ? `${fmtLogin(SESSAO.login)} · acesso total` : `Instituição · ${fmtLogin(SESSAO.login)}`;
   $("#userAv").textContent = iniciais(nome);
   $("#buscaInput").placeholder = ehAdmin() ? "Localizar estudante por nome ou CPF…" : "Localizar estudante da instituição…";
   const escs = SESSAO.escolas || [];
@@ -562,7 +563,7 @@ async function escolas() {
   const rowE = e => `<tr data-n="${esc(e.nome.toLowerCase())}"><td>${e.id}</td><td>${esc(e.nome)}</td><td class="mono">${esc(e.cod_smtt)}</td><td class="mono">${esc(e.inep)}</td>
       <td>${e.geduc_nome ? esc(e.geduc_nome) : `<span class="muted">mesmo nome</span>`}</td>
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
-      <td>${e.logins?.length ? e.logins.map(l => `<div class="mono">${esc(fmtCPF(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
+      <td>${e.logins?.length ? e.logins.map(l => `<div>${esc(fmtLogin(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
       <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : `<span class="badge b-ok">ativa</span>`}</td>
       <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${e.id}">Editar</button>
         <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
@@ -571,7 +572,7 @@ async function escolas() {
     colunas: [["ID", "numero"], ["Instituição"], ["Cód. SMTT"], ["INEP"], ["CNPJ"], ["E-mail"], ["Vínculo GEDUC"], ["Alunos GEDUC", "numero"],
       ["Usuários"], ["Representantes"], ["Cursos"], ["Situação"]],
     linhas: filtradas().map(e => [e.id, e.nome, e.cod_smtt, e.inep, fmtCNPJ(e.cnpj), e.email, e.geduc_nome || "mesmo nome",
-      res[e.id]?.matriculados || 0, (e.logins || []).map(fmtCPF).join("\n"),
+      res[e.id]?.matriculados || 0, (e.logins || []).map(fmtLogin).join("\n"),
       (e.representantes || []).map(r => [r.nome, r.cargo, r.contato, r.email].filter(Boolean).join(" · ")).join("\n"),
       (e.cursos || []).map(c => `${c.curso} (grau ${c.grau})`).join("\n"),
       e.bloqueado ? "Bloqueada" + (e.motivo_bloqueio ? `: ${e.motivo_bloqueio}` : "") : "Ativa"])});
@@ -705,11 +706,11 @@ async function remessas(_, qs) {
   const finais = async () => {
     const fs = await api("/api/arquivos-finais" + (eid ? "?escola_id=" + eid : ""));
     XLS.finais = () => ({titulo: "Arquivos do processamento final", colunas: [["#", "numero"], ["Instituição"], ["Importado em", "datahora"],
-      ["Enviado por", "cpf"], ["Arquivo TXT"], ["Registros", "numero"], ["PDF (CPFs)"]],
-      linhas: fs.map(f => [f.id, f.escola, f.criado_em, f.enviado_por, f.txt_nome, f.n_registros, f.pdf_nome])});
+      ["Enviado por"], ["Arquivo TXT"], ["Registros", "numero"], ["PDF (CPFs)"]],
+      linhas: fs.map(f => [f.id, f.escola, f.criado_em, fmtLogin(f.enviado_por), f.txt_nome, f.n_registros, f.pdf_nome])});
     $("#xlsFinais").innerHTML = fs.length ? btnXls("finais") : "";
     $("#finais").innerHTML = fs.length ? `<div class="table-wrap" style="max-height:none"><table><thead><tr><th>#</th><th>Instituição</th><th>Importado em</th><th>Por</th><th>TXT</th><th class="num">Registros</th><th>PDF (CPFs)</th><th></th></tr></thead><tbody>
-      ${fs.map(f => `<tr><td>${f.id}</td><td>${esc(f.escola)}</td><td>${fmtDH(f.criado_em)}</td><td class="mono">${esc(fmtCPF(f.enviado_por))}</td>
+      ${fs.map(f => `<tr><td>${f.id}</td><td>${esc(f.escola)}</td><td>${fmtDH(f.criado_em)}</td><td>${esc(fmtLogin(f.enviado_por))}</td>
         <td class="mono">${esc(f.txt_nome)}</td><td class="num">${fmtN(f.n_registros)}</td><td>${esc(f.pdf_nome)}</td>
         <td class="acoes"><div class="row"><a class="btn-dl btn-sm" href="/api/arquivos-finais/${f.id}/txt">${icDl}TXT</a><a class="btn-dl btn-sm" href="/api/arquivos-finais/${f.id}/pdf">${icDl}PDF</a><button class="btn-sm danger" data-delf="${f.id}">Excluir</button></div></td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty" style="padding:24px">Nenhum arquivo final importado.</div>`;
@@ -968,10 +969,10 @@ async function usuarios() {
   const [us] = [await api("/api/usuarios"), await loadEscolas()];
   const nomes = Object.fromEntries(ESCOLAS.map(e => [e.id, e.nome]));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${us.length} usuário(s)</h2><span class="spacer"></span>
-      <input id="fU" placeholder="Filtrar CPF ou instituição…" style="width:260px">${btnXls("usuarios")}<button class="primary" id="novoU">Novo usuário</button></div>
-    <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Usuário (CPF)</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
+      <input id="fU" placeholder="Filtrar e-mail ou instituição…" style="width:260px">${btnXls("usuarios")}<button class="primary" id="novoU">Novo usuário</button></div>
+    <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Usuário (e-mail)</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
     <tbody id="tbUBody"></tbody></table></div><div id="pgU"></div></div>`;
-  const rowU = x => `<tr><td class="mono"><b>${esc(fmtCPF(x.login))}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
+  const rowU = x => `<tr><td><b>${esc(fmtLogin(x.login))}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
       <td>${x.perfil === "admin" ? `<span class="badge b-info">Administrador</span>` : `<span class="badge b-mute">Instituição</span>`}</td>
       <td>${x.perfil === "admin" ? `<span class="muted">todas</span>` : x.escolas.map(id => `<div>${esc(nomes[id] || "#" + id)}${ESCOLAS.find(e => e.id === id)?.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</div>`).join("")}</td>
       <td>${fmtDH(x.criado_em)}</td><td class="acoes"><button class="btn-sm" data-u="${x.id}">Editar</button></td></tr>`;
@@ -980,8 +981,8 @@ async function usuarios() {
     return us.filter(x => x.login.includes(q) || (qd && x.login.includes(qd)) || x.escolas.some(id => (nomes[id] || "").toLowerCase().includes(q)));
   };
   XLS.usuarios = () => ({titulo: "Usuários", subtitulo: $("#fU").value && `Filtro: ${$("#fU").value}`,
-    colunas: [["Usuário (CPF)", "cpf"], ["Perfil"], ["Instituições"], ["Criado em", "datahora"]],
-    linhas: filtrados().map(x => [x.login, x.perfil === "admin" ? "Administrador" : "Instituição",
+    colunas: [["Usuário (e-mail)"], ["Perfil"], ["Instituições"], ["Criado em", "datahora"]],
+    linhas: filtrados().map(x => [fmtLogin(x.login), x.perfil === "admin" ? "Administrador" : "Instituição",
       x.perfil === "admin" ? "Todas" : x.escolas.map(id => nomes[id] || "#" + id).join("\n"), x.criado_em])});
   const renderU = () => {
     const pg = paginar("usuarios", filtrados(), renderU);
@@ -998,7 +999,7 @@ function editarUsuario(x) {
   const proprio = x.login === SESSAO.login;
   modal(`<div class="mh"><h2>${novo ? "Novo usuário" : "Editar usuário"}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
     <form id="fUsr"><div class="mb form">
-      <div><label>Usuário (CPF)</label><input name="login" required value="${esc(fmtCPF(x.login))}" autocomplete="off" inputmode="numeric" placeholder="Somente números"></div>
+      <div><label>E-mail (usuário)</label><input name="login" required value="${esc(x.login)}" autocomplete="off" inputmode="email" placeholder="nome@exemplo.com"></div>
       <div><label>${novo ? "Senha (mín. 6 caracteres)" : "Nova senha (vazio = manter a atual)"}</label><input name="senha" type="password" ${novo ? "required" : ""} minlength="6" autocomplete="new-password"></div>
       <div class="full"><label>Perfil</label><select name="perfil" ${proprio ? "disabled" : ""}>
         <option value="instituicao" ${x.perfil === "instituicao" ? "selected" : ""}>Instituição: acessa só as instituições vinculadas, sem cadastrar instituições nem gerar orçamentos</option>
@@ -1022,7 +1023,7 @@ function editarUsuario(x) {
     closeModal(); toast("Usuário salvo"); usuarios();
   };
   const del = $("#delU");
-  if (del) del.onclick = async () => { if (confirm(`Excluir o usuário ${fmtCPF(x.login)}?`)) { await api(`/api/usuarios/${x.id}`, {method: "DELETE"}); closeModal(); toast("Usuário excluído"); usuarios(); } };
+  if (del) del.onclick = async () => { if (confirm(`Excluir o usuário ${fmtLogin(x.login)}?`)) { await api(`/api/usuarios/${x.id}`, {method: "DELETE"}); closeModal(); toast("Usuário excluído"); usuarios(); } };
 }
 
 async function boot() {

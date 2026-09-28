@@ -58,10 +58,17 @@ def _confere(senha: str, guardado: str) -> bool:
     return hmac.compare_digest(_hash(senha, salt), guardado)
 
 
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
 def _norm_login(login: str) -> str:
-    """O usuario e o CPF, guardado so com os digitos; aceita digitado com ponto e traco."""
+    """O usuario e o e-mail, sem diferenca de maiusculas. Logins antigos por CPF aceitam ponto e traco."""
     login = login.strip().lower()
     return so_digitos(login) if re.fullmatch(r"[\d.\-\s]+", login) else login
+
+
+def _email_ok(login: str) -> bool:
+    return bool(EMAIL_RE.fullmatch(login))
 
 
 def _valida_senha(senha: str):
@@ -175,8 +182,8 @@ def setup(d: LoginIn, request: Request, response: Response):
     if con.execute("SELECT 1 FROM usuarios LIMIT 1").fetchone():
         raise HTTPException(400, "O administrador já foi criado")
     login = _norm_login(d.login)
-    if not cpf_valido(login):
-        raise HTTPException(400, "O usuário deve ser um CPF válido (11 dígitos)")
+    if not _email_ok(login):
+        raise HTTPException(400, "O usuário deve ser um e-mail válido")
     _valida_senha(d.senha)
     with con:
         uid = con.execute("INSERT INTO usuarios (login, senha_hash, perfil) VALUES (?,?,'admin') RETURNING id",
@@ -247,13 +254,13 @@ def _usuarios(con) -> list[dict]:
 def _valida_usuario(con, d: UsuarioIn, uid: int | None) -> str:
     login = _norm_login(d.login)
     atual = con.execute("SELECT login FROM usuarios WHERE id=?", (uid,)).fetchone() if uid else None
-    if not (atual and atual["login"] == login) and not cpf_valido(login):  # logins antigos continuam valendo
-        raise HTTPException(400, "O usuário deve ser um CPF válido (11 dígitos)")
+    if not (atual and atual["login"] == login) and not _email_ok(login):  # logins antigos continuam valendo
+        raise HTTPException(400, "O usuário deve ser um e-mail válido")
     if d.perfil not in ("admin", "instituicao"):
         raise HTTPException(400, "Perfil inválido")
     outro = con.execute("SELECT id FROM usuarios WHERE login=?", (login,)).fetchone()
     if outro and outro["id"] != uid:
-        raise HTTPException(400, f"Já existe usuário com o CPF {login}")
+        raise HTTPException(400, f"Já existe usuário com o e-mail {login}")
     if d.senha or uid is None:
         _valida_senha(d.senha)
     if d.perfil == "instituicao":
@@ -401,7 +408,6 @@ ESCOLA_COLS = ("nome", "cod_smtt", "inep", "geduc_nome", "nivel", "matriculados_
                "cnpj", "email")
 REP_COLS = ("nome", "cpf", "cargo", "contato", "email")
 CURSO_COLS = ("curso", "grau", "series", "turnos")
-EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 def _limpo(m: BaseModel) -> dict:
