@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -28,7 +28,21 @@ async def _ciclo(_app):
 app = FastAPI(title="SIS SMPE", lifespan=_ciclo)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
-_import = {"rodando": False, "msg": [], "erro": None}
+_import = {"rodando": False, "msg": [], "erro": None, "base": "", "arquivo": "", "inicio": 0, "etapa": ""}
+_import_thread: threading.Thread | None = None
+
+
+def _import_status() -> dict:
+    """Estado da importacao; se a tarefa morreu sem avisar (ex.: reinicio), libera para uma nova."""
+    if _import["rodando"] and _import_thread is not None and not _import_thread.is_alive():
+        _import.update(rodando=False, erro=_import["erro"] or "A importação foi interrompida. Envie o arquivo de novo.")
+    return {**_import, "segundos": int(time.time() - _import["inicio"]) if _import["inicio"] else 0}
+
+
+@app.exception_handler(Exception)
+async def erro_interno(request: Request, ex: Exception):
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"detail": f"Erro interno no servidor ({type(ex).__name__}: {str(ex)[:300]})"})
 
 
 @app.middleware("http")
@@ -1108,14 +1122,20 @@ def importacoes(u: dict = Depends(admin)):
     return {"historico": [dict(r) for r in con.execute("SELECT * FROM importacoes ORDER BY id DESC LIMIT 1000")],
             "bases": {b: {"label": importer.LABELS[b], "aba": importer.BASES[b][0].strip(),
                           "linhas": con.execute(f"SELECT COUNT(*) FROM {b}").fetchone()[0]} for b in importer.BASES},
-            "status": _import}
+            "status": _import_status()}
 
 
 @app.post("/api/importar")
 async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: dict = Depends(admin)):
-    if _import["rodando"]:
-        raise HTTPException(409, "Já existe uma importação em andamento")
-    _import.update(rodando=True, msg=[], erro=None)  # antes do upload: impede duas importacoes ao mesmo tempo
+    global _import_thread
+    st = _import_status()
+    if st["rodando"]:
+        rotulo = "Planilha completa" if st["base"] == "planilha" else importer.LABELS.get(st["base"], st["base"])
+        raise HTTPException(409, f"Já existe uma importação em andamento ({rotulo}, há {st['segundos'] // 60} min "
+                                 f"{st['segundos'] % 60} s). Aguarde terminar.")
+    # antes do upload: impede duas importacoes ao mesmo tempo
+    _import.update(rodando=True, msg=[], erro=None, base=base, arquivo=arquivo.filename or "", inicio=time.time(),
+                   etapa="Recebendo o arquivo")
     try:
         data = await arquivo.read()
     except Exception:
@@ -1123,8 +1143,13 @@ async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: di
         raise
     nome = arquivo.filename or "arquivo"
 
+    def log(m: str):
+        _import["msg"].append(m)
+        _import["etapa"] = m
+
     def job():
         try:
+            _import["etapa"] = "Lendo o arquivo"
             con = db.connect()
             if base == "planilha":
                 import tempfile
@@ -1132,20 +1157,22 @@ async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: di
                 with tempfile.NamedTemporaryFile(suffix=".xlsm", delete=False) as f:
                     f.write(data)
                 try:
-                    importer.import_workbook(f.name, log=_import["msg"].append)
+                    importer.import_workbook(f.name, log=log, etapa=lambda m: _import.update(etapa=m))
                 finally:
                     Path(f.name).unlink(missing_ok=True)
             else:
                 if base not in importer.BASES:
                     raise ValueError("Base desconhecida")
                 recs = importer.read_file(base, nome, data)
+                _import["etapa"] = f"Gravando {len(recs)} linhas no banco"
                 n = importer.save(con, base, recs, nome)
-                _import["msg"].append(f"{importer.LABELS[base]}: {n} linhas")
+                log(f"{importer.LABELS[base]}: {n} linhas")
         except Exception as ex:
             traceback.print_exc()
             _import["erro"] = str(ex) if isinstance(ex, ValueError) else f"{type(ex).__name__}: {ex}"
         finally:
-            _import["rodando"] = False
+            _import.update(rodando=False, etapa="")
 
-    threading.Thread(target=job, daemon=True).start()
+    _import_thread = threading.Thread(target=job, daemon=True)
+    _import_thread.start()
     return {"ok": True}

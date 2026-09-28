@@ -240,6 +240,12 @@ class PgConnection:
         cur.executemany(_sql_pg(sql, True), seq)
         return cur
 
+    def copy_rows(self, tabela: str, cols: list[str], rows):
+        """Carga em lote com COPY (bem mais rapido que INSERT linha a linha nas bases grandes)."""
+        with self._con.cursor().copy(f"COPY {tabela} ({', '.join(cols)}) FROM STDIN") as cp:
+            for r in rows:
+                cp.write_row(r)
+
     def __enter__(self):
         tx = self._con.transaction()
         tx.__enter__()

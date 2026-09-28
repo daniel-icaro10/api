@@ -903,18 +903,33 @@ async function bases() {
   });
   if (d.status.rodando) acompanhar();
 }
+let IMP_TIMER = null;
 async function enviar(base, file) {
+  const st = (await api("/api/importacoes")).status;
+  if (st.rodando) { toast("Aguarde: já existe uma importação em andamento"); return acompanhar(); }
   const fd = new FormData(); fd.append("base", base); fd.append("arquivo", file);
   $("#impStatus").innerHTML = `<div class="alert info">Enviando ${esc(file.name)}…</div>`;
-  await api("/api/importar", {method: "POST", body: fd});
+  try { await api("/api/importar", {method: "POST", body: fd, semLogin: true}); }
+  catch (e) { if (!/em andamento/.test(e.message)) { $("#impStatus").innerHTML = `<div class="alert warn">Falha: ${esc(e.message)}</div>`; return; } }
   acompanhar();
 }
+const BASE_ROTULO = {planilha: "Planilha completa", escolas: "Cadastro de instituições", geduc: "GEDUC", censo: "Censo escolar", smtt: "SMTT", status_alunos: "Alunos por status"};
+const fmtSeg = s => s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
 function acompanhar() {
-  const h = setInterval(async () => {
-    const s = (await api("/api/importacoes")).status;
-    $("#impStatus").innerHTML = `<div class="alert ${s.erro ? "warn" : "info"}">${s.rodando ? "Importando… " : s.erro ? "Falha: " + esc(s.erro) : "Importação concluída. "}${s.msg.map(esc).join(" · ")}</div>`;
-    if (!s.rodando) { clearInterval(h); if (!s.erro) { await loadEscolas(); setTimeout(bases, 1500); } }
-  }, 1500);
+  clearInterval(IMP_TIMER);
+  const passo = async () => {
+    let s;
+    try { s = (await api("/api/importacoes", {semLogin: true})).status; }
+    catch { if ($("#impStatus")) $("#impStatus").innerHTML = `<div class="alert info">Servidor ocupado com a importação, aguardando resposta…</div>`; return; }
+    const box = $("#impStatus");
+    if (!box) return clearInterval(IMP_TIMER);  // saiu da tela
+    const qual = `${BASE_ROTULO[s.base] || s.base}${s.arquivo ? ` (${esc(s.arquivo)})` : ""}`;
+    box.innerHTML = s.rodando
+      ? `<div class="alert info"><b>Importando ${qual}</b> · ${esc(s.etapa || "processando")} · ${fmtSeg(s.segundos)}<br><small>Bases grandes, como o GEDUC, podem levar alguns minutos no servidor. Pode continuar usando o sistema.</small>${s.msg.length ? `<br>${s.msg.map(esc).join(" · ")}` : ""}</div>`
+      : `<div class="alert ${s.erro ? "warn" : "info"}">${s.erro ? "Falha: " + esc(s.erro) : "Importação concluída. "}${s.msg.map(esc).join(" · ")}</div>`;
+    if (!s.rodando) { clearInterval(IMP_TIMER); if (!s.erro) { await loadEscolas(); setTimeout(() => $("#impStatus") && bases(), 2500); } }
+  };
+  IMP_TIMER = setInterval(passo, 2000); passo();
 }
 
 // ------------------------------------------------------------------ busca

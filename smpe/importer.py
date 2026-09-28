@@ -294,16 +294,19 @@ def save(con, base: str, recs: list[dict], arquivo: str) -> int:
             con.execute(f"DELETE FROM {base}")
             cols = list(BASES[base][2].keys())
             extra = ["nome_norm"] + (["escola_norm"] if base == "geduc" else [])
-            sql = f"INSERT INTO {base} ({','.join(cols + extra)}) VALUES ({','.join('?' * (len(cols) + len(extra)))})"
             nome_col = NOME_COL[base]
-            con.executemany(sql, [
-                [r.get(c, "") for c in cols] + [norm_nome(r.get(nome_col))]
-                + ([norm_nome(r.get("escola"))] if base == "geduc" else []) for r in recs])
+            linhas = ([r.get(c, "") for c in cols] + [norm_nome(r.get(nome_col))]
+                      + ([norm_nome(r.get("escola"))] if base == "geduc" else []) for r in recs)
+            if hasattr(con, "copy_rows"):  # Postgres
+                con.copy_rows(base, cols + extra, linhas)
+            else:
+                sql = f"INSERT INTO {base} ({','.join(cols + extra)}) VALUES ({','.join('?' * (len(cols) + len(extra)))})"
+                con.executemany(sql, list(linhas))
         con.execute("INSERT INTO importacoes (base, arquivo, linhas) VALUES (?,?,?)", (base, arquivo, len(recs)))
     return len(recs)
 
 
-def import_workbook(path: str, bases: list[str] | None = None, log=print) -> dict:
+def import_workbook(path: str, bases: list[str] | None = None, log=print, etapa=lambda m: None) -> dict:
     """Importa a planilha SIS SMPE completa (todas as abas conhecidas)."""
     con = db.connect()
     data = Path(path).read_bytes()
@@ -314,11 +317,13 @@ def import_workbook(path: str, bases: list[str] | None = None, log=print) -> dic
         if ws is None:
             log(f"{LABELS[base]}: aba '{BASES[base][0].strip()}' não encontrada, pulando")
             continue
+        etapa(f"Lendo {LABELS[base]}")
         try:
             recs = _rows_to_records(base, ws.iter_rows(values_only=True))
         except ValueError as ex:  # aba vazia ou sem cabecalho: mantem a base atual e segue com as outras
             log(f"{LABELS[base]}: {ex}, base mantida")
             continue
+        etapa(f"Gravando {LABELS[base]}: {len(recs)} linhas")
         out[base] = save(con, base, recs, Path(path).name)
         log(f"{LABELS[base]}: {out[base]} linhas")
     wb.close()
