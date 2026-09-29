@@ -39,7 +39,7 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 | ALUNO + ENTRADA + NUM.CARACT | Remessa SMTT: arquivo `INST_<cód>_REM_<nº>.txt` em UTF-8 com BOM, 21 campos, 375 colunas |
 | Relação simplificada de estudantes (relatório oficial da SMTT) | Remessas → **Baixar PDF**: nome, CPF, nascimento e mãe de cada aluno da remessa, no layout oficial, com a logo do sistema e o código de verificação (SHA-1 do TXT) no rodapé |
 | AlunoCriticaUtf8.exe (validador oficial SMPE) | Criticar remessa: mesmas críticas de 0 a 17 e regras A a C, com relatório `CRITICA_*.txt`, mais a crítica 18 (mãe com nome e sobrenome) |
-| ORÇAMENTO | Orçamento (só administrador): migrados com CPF × preço unitário + peticionamento − desconto |
+| ORÇAMENTO | Orçamento (só administrador): matriculados com CPF × valor unitário por aluno + peticionamento − desconto |
 | GEDUC, CENSO, SMTT, ALUNOS_POR_STATUS | Bases e importação |
 
 ## Regra do CPF consolidado (mesma fórmula da coluna AO)
@@ -55,13 +55,13 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 
 - Verificação dos dígitos do CPF, com a pendência **CPF inválido**.
 - CPF repetido entre alunos da mesma escola marcado como **CPF duplicado**.
-- Histórico de remessas. Cada aluno enviado fica marcado como migrado, e o orçamento conta os migrados reais.
+- Histórico de remessas. Cada aluno enviado fica marcado como migrado, e o orçamento mostra os migrados e o índice de migração.
 - **Mãe sem sobrenome**: o nome da mãe precisa ter nome e sobrenome (partículas como DA, DE e DOS não contam). O aluno sem isso não fica apto e, no arquivo, recebe a crítica 18.
 - **Correção e reprocessamento**: a instituição corrige qualquer campo do aluno (nome, CPF, mãe, pai, sexo, nascimento, série, turno, turma, matrícula, endereço, CEP, telefone e documentos). Os campos já vêm preenchidos com a informação atual, e a instituição só edita o que está errado (por exemplo, apaga os caracteres que sobram no endereço). Só os campos alterados viram correção. Os campos com limite no layout da remessa mostram um contador de caracteres, que fica vermelho quando o texto passa do tamanho e seria cortado. Os campos com problema aparecem destacados, e o aluno é reprocessado ao salvar.
 - **Cadastro individual**: a instituição cadastra, edita e exclui alunos que não estão no GEDUC (botão **Cadastrar aluno** no Matriculado). O formulário tem **Tipo de ensino** (campo CURSO da remessa) e **Grau** (1, 2 ou 3). As opções de Tipo de ensino são os cursos cadastrados na instituição, e o grau acompanha o do curso escolhido. Sem cursos cadastrados, a lista usa Ensino Fundamental, Ensino Médio, Educação Infantil e EJA. Esses alunos passam pelas mesmas regras e entram na remessa normalmente.
 - **Telefone**: vem da correção, do GEDUC (coluna `TELEFONE`), da base Alunos por status ou do SMTT, nessa ordem. O sistema usa o primeiro número válido do campo e completa o DDD 98 quando falta.
 - **CEP**: vem do GEDUC (coluna `CEP` ou `CEP_ALUNO`), a menos que a instituição corrija. Sem CEP, a remessa usa 65000000.
-- **Orçamento só com CPF**: a base do orçamento é o total de matriculados com CPF consolidado, e só contam os migrados com CPF.
+- **Orçamento só com CPF**: o valor é a quantidade de matriculados com CPF consolidado (ou o número informado no orçamento) × o valor unitário por aluno, mais o peticionamento e menos o desconto.
 - **Arquivo do processamento final**: em Remessas, a instituição importa o TXT do processamento final junto com o PDF que contém os CPFs dos alunos (os dois são obrigatórios). Os arquivos ficam arquivados para download e não alteram a situação dos alunos.
 - **Suporte e identidade visual**: em Configurações, o administrador troca a logo, define o texto da opção **Suporte** e o número do **WhatsApp**, que aparece como botão logo abaixo do Suporte.
 - **Fichas da SMTT**: em **Instituições → Fichas** (e em **Relatórios → Fichas SMTT**, para a instituição) o sistema gera em PDF, no layout oficial da Central de Atendimento ao Estudante, a **Ficha de cadastro da instituição de ensino**, a **Relação de cursos da instituição** (36 cursos por página) e a **Ficha de cadastro do representante** (uma página por representante). Os dados vêm do cadastro da instituição: endereço, telefone e rede de ensino (Dados cadastrais), documentos, salas e informações complementares (Estrutura e documentos: informa-se a quantidade de **salas** por tipo de ensino e turno; o Nº de salas é a soma dos turnos e a linha "Salas de aula" é calculada a partir desse quadro), cursos com tipo de ensino e modalidade (Cursos) e representantes com RG, endereço, turnos de responsabilidade e quem assina como diretor(a) e adjunto(a) (Representantes). A janela de fichas mostra o que falta preencher em cada uma. Os modelos ficam em `smpe/modelos`.

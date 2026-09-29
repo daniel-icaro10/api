@@ -1040,24 +1040,24 @@ async function relatorios(eid, qs) {
 async function orcamento(eid) {
   eid = eid || ultimaEscola();
   const cfg = await api("/api/config");
-  $("#view").innerHTML = `<div class="row no-print" style="margin-bottom:14px"><div style="width:420px">${escolaSelect("selEscO", eid)}</div>
-    <label style="margin:0">Preço unitário (R$)</label><input id="preco" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:110px">
+  $("#view").innerHTML = `<div class="row no-print" style="margin-bottom:14px"><div style="width:340px">${escolaSelect("selEscO", eid)}</div>
+    <label style="margin:0">Valor unitário por aluno (R$)</label><input id="preco" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:100px">
     <span class="spacer"></span>${eid ? btnXls("orcamento") : ""}<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="orcDoc"></div>`;
   $("#selEscO").onchange = ev => location.hash = "#/orcamento/" + ev.target.value;
-  $("#preco").onchange = async ev => { await api("/api/config", {method: "PUT", body: {preco_unitario: ev.target.value}}); toast("Preço atualizado"); if (eid) render(await api(`/api/escolas/${eid}/orcamento`)); };
+  $("#preco").onchange = async ev => { await api("/api/config", {method: "PUT", body: {preco_unitario: ev.target.value}}); toast("Valor unitário atualizado"); if (eid) render(await api(`/api/escolas/${eid}/orcamento`)); };
   if (!eid) { $("#orcDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }
   lembrarEscola(eid);
   const render = o => {
     XLS.orcamento = () => ({titulo: `Orçamento - ${o.escola.nome}`, subtitulo: `Cód. SMTT ${o.escola.cod_smtt || "—"} · ${o.matriculados} matriculados com CPF · índice ${fmtPct(o.indice)}`,
-      colunas: [["Descrição"], ["Preço unitário", "moeda"], ["Qtd", "numero"], ["Valor", "moeda"]],
-      linhas: [["Alunos matriculados com CPF (migrados)", o.preco_unitario, o.migrados, o.subtotal], ["Peticionamento", "", 1, o.peticionamento],
+      colunas: [["Descrição"], ["Valor unitário por aluno", "moeda"], ["Qtd", "numero"], ["Valor", "moeda"]],
+      linhas: [["Alunos matriculados com CPF", o.preco_unitario, o.matriculados, o.subtotal], ["Peticionamento", "", 1, o.peticionamento],
         ["Desconto", "", "", -o.desconto], ["Valor total", "", "", o.total]]});
     $("#orcDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/api/logo" alt=""><h2>ORÇAMENTO — MIGRAÇÃO DE ESTUDANTES (SMTT)</h2></div>
       <div class="dmeta"><span><b>INSTITUIÇÃO:</b> ${esc(o.escola.nome)}</span><span><b>COD. SMTT:</b> ${esc(o.escola.cod_smtt)}</span><span><b>DATA:</b> ${agora()}</span></div>
       <table><thead><tr><th>Matriculados com CPF</th><th>Alunos migrados</th><th>Não migrados</th><th>Índice de migração</th><th>Valor</th></tr></thead>
       <tbody><tr><td class="num">${fmtN(o.matriculados)}</td><td class="num">${fmtN(o.migrados)}</td><td class="num">${fmtN(o.nao_migrados)}</td><td class="num">${fmtPct(o.indice)}</td><td class="num"><b>${fmtBRL(o.total)}</b></td></tr></tbody></table>
-      <br><table><thead><tr><th>Descrição</th><th class="num">Preço unitário</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>
-        <tr><td>Alunos matriculados com CPF (migrados)</td><td class="num">${fmtBRL(o.preco_unitario)}</td><td class="num">${fmtN(o.migrados)}</td><td class="num">${fmtBRL(o.subtotal)}</td></tr>
+      <br><table><thead><tr><th>Descrição</th><th class="num">Valor unitário por aluno</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>
+        <tr><td>Alunos matriculados com CPF <small class="muted">(${fmtN(o.matriculados)} × ${fmtBRL(o.preco_unitario)})</small></td><td class="num">${fmtBRL(o.preco_unitario)}</td><td class="num">${fmtN(o.matriculados)}</td><td class="num">${fmtBRL(o.subtotal)}</td></tr>
         <tr><td>Peticionamento</td><td></td><td class="num">1</td><td class="num">${fmtBRL(o.peticionamento)}</td></tr>
         <tr><td>Desconto</td><td></td><td></td><td class="num">− ${fmtBRL(o.desconto)}</td></tr>
         <tr><td colspan="3"><b>Valor total</b></td><td class="num"><b>${fmtBRL(o.total)}</b></td></tr></tbody></table>
@@ -1169,7 +1169,7 @@ async function config() {
       <div class="full"><label>Texto da opção Suporte</label><textarea name="suporte_texto" rows="4" placeholder="Horário de atendimento, e-mail, telefone…">${esc(cfg.suporte_texto || "")}</textarea></div>
       <div class="full"><button class="primary">Salvar suporte</button></div></form></div>
     <div class="card"><div class="card-h"><h2>Orçamento</h2></div><form id="fPreco" class="card-b row" style="align-items:flex-end">
-      <div><label>Preço unitário por aluno com CPF (R$)</label><input name="preco_unitario" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:180px"></div>
+      <div><label>Valor unitário por aluno com CPF (R$)</label><input name="preco_unitario" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:180px"></div>
       <button class="primary">Salvar</button></form></div></div>`;
   $("#fLogo").onsubmit = async ev => {
     ev.preventDefault();

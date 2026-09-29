@@ -355,7 +355,8 @@ def salvar_lote(con, escola, remessa: dict) -> int:
 # ---------------------------------------------------------------- orcamento (aba ORCAMENTO)
 
 def orcamento(con, escola, res: dict | None = None) -> dict:
-    """So entram no orcamento alunos com CPF: a base e o total de matriculados com CPF consolidado."""
+    """Valor = matriculados com CPF (consolidado, ou o numero informado) x valor unitario por aluno
+    + peticionamento - desconto. Os migrados aparecem so como acompanhamento."""
     res = res or resumo(alunos_da_escola(con, escola))
     preco = float(db.get_config(con, "preco_unitario", "0.43"))
     matric = escola["matriculados_info"] or res["com_cpf"]
@@ -364,8 +365,8 @@ def orcamento(con, escola, res: dict | None = None) -> dict:
     pet, desc = escola["peticionamento"] or 0, escola["desconto"] or 0
     return {"matriculados": matric, "migrados": migr, "nao_migrados": max(matric - migr, 0),
             "indice": round(migr / matric, 4) if matric else 0, "preco_unitario": preco,
-            "subtotal": round(migr * preco, 2), "peticionamento": pet, "desconto": desc,
-            "total": round(migr * preco + pet - desc, 2)}
+            "subtotal": round(matric * preco, 2), "peticionamento": pet, "desconto": desc,
+            "total": round(matric * preco + pet - desc, 2)}
 
 
 def relatorio(alunos: list[dict], tipo: str) -> list[dict]:
