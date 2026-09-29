@@ -3,6 +3,7 @@ import re
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 import codecs
+from datetime import datetime
 
 from . import db
 from .critica import LAYOUT, LEGENDA, TAM_LINHA, criticar_campos
@@ -30,6 +31,10 @@ class Bases:
         self.censo, self.censo_ch = _indices(con, "censo")
         self.smtt, self.smtt_ch = _indices(con, "smtt")
         self.status_nome, self.status_ch = _indices(con, "status_alunos")
+        self.status_escola = defaultdict(list)
+        for rs in self.status_nome.values():
+            for r in rs:
+                self.status_escola[norm_nome(r["escola"])].append(r)
         self.ajustes = {r["id_aluno"]: dict(r) for r in con.execute("SELECT * FROM ajustes")}
         self.migrados = defaultdict(list)
         for r in con.execute("""SELECT la.id_aluno, l.id, l.criado_em, l.escola_id FROM lote_alunos la
@@ -100,7 +105,72 @@ def aluno_na_escola(con, escola, id_aluno: str) -> bool:
     return bool(con.execute(f"SELECT 1 FROM geduc WHERE id_aluno=? AND {where}", [id_aluno, *args]).fetchone())
 
 
-def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
+def nomes_da_escola(escola) -> set[str]:
+    """Nomes normalizados com que a instituicao aparece nas bases (vinculo GEDUC e nome do cadastro)."""
+    return {norm_nome(escola["geduc_nome"] or escola["nome"]), norm_nome(escola["nome"])}
+
+
+def status_da_escola(bases: Bases, escola) -> list[dict]:
+    return [s for n in nomes_da_escola(escola) for s in bases.status_escola.get(n, [])]
+
+
+def pelo_status(escola) -> str:
+    """Data em que os matriculados passaram a seguir o Alunos por status da instituicao (vazio = GEDUC)."""
+    try:
+        return escola["status_atualizado_em"] or ""
+    except (KeyError, IndexError):
+        return ""
+
+
+def _casar_status(alunos: list[dict], status: list[dict]) -> tuple[list, list, list]:
+    """Cruza os matriculados com o Alunos por status pelo nome e data de nascimento (o ID_ALUNO do Alunos por
+    status e de outra numeracao) -> (so no status, so no sistema, mesmo aluno com o nome escrito diferente)."""
+    def chave(nome, nasc):
+        return chave_nome(nome), (nasc or "")[:10]
+
+    sis = {chave(a["nome_norm"], a["dt_nasc"]) for a in alunos}
+    sis_nome = {chave_nome(a["nome_norm"]) for a in alunos}
+    st_keys = {chave(s["nome_norm"], s["nascimento"]) for s in status}
+    st_nome = {chave_nome(s["nome_norm"]) for s in status}
+
+    def casa(k, conj, conj_nome, tem_data):  # sem data de um dos lados, vale o nome
+        return k in conj or (not tem_data and k[0] in conj_nome)
+
+    so_status = [s for s in status if not casa(chave(s["nome_norm"], s["nascimento"]), sis, sis_nome, bool(s["nascimento"]))]
+    so_sistema = [a for a in alunos
+                  if status and not casa(chave(a["nome_norm"], a["dt_nasc"]), st_keys, st_nome, bool(a["dt_nasc"]))]
+    # mesmo aluno com o nome digitado de outro jeito: mesma data de nascimento e nome muito parecido
+    nome_diferente = []
+    for s in list(so_status):
+        cands = [(SequenceMatcher(None, chave_nome(s["aluno"]), chave_nome(a["aluno"])).ratio(), a) for a in so_sistema
+                 if s["nascimento"] and a["dt_nasc"] == s["nascimento"]]
+        sim, a = max(cands, key=lambda x: x[0], default=(0, None))
+        if a and sim >= 0.8:
+            nome_diferente.append((s, a, round(sim, 2)))
+            so_status.remove(s)
+            so_sistema.remove(a)
+    return so_status, so_sistema, nome_diferente
+
+
+def _fora_do_status(alunos: list[dict], status: list[dict]) -> list[dict]:
+    """Matriculados que nao estao no Alunos por status, mais os repetidos (GEDUC e cadastro individual com o mesmo
+    nome e nascimento: fica o cadastro individual)."""
+    fora = _casar_status(alunos, status)[1]
+    ids = {a["id_aluno"] for a in fora}
+    vistos = set()
+    for a in sorted(alunos, key=lambda a: not a.get("manual")):
+        if a["id_aluno"] in ids:
+            continue
+        k = chave_nome(a["nome_norm"]), (a["dt_nasc"] or "")[:10]
+        if k in vistos:
+            fora.append(a)
+        vistos.add(k)
+    return fora
+
+
+def alunos_da_escola(con, escola, bases: Bases | None = None, todos: bool = False) -> list[dict]:
+    """Matriculados: GEDUC + cadastro individual; se a instituicao foi atualizada pelo Alunos por status, so os que
+    estao nele (todos=True ignora esse filtro)."""
     bases = bases or Bases(con)
     where, args = filtro_escola(escola)
     rows = [dict(r) for r in con.execute(f"SELECT * FROM geduc WHERE {where} ORDER BY aluno", args)]
@@ -141,6 +211,10 @@ def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
             "migrado": bool(bases.migrados.get(g["id_aluno"])),
             "lotes": [m["lote"] for m in bases.migrados.get(g["id_aluno"], [])],
         })
+    status = status_da_escola(bases, escola) if pelo_status(escola) and not todos else []
+    if status:
+        fora = {a["id_aluno"] for a in _fora_do_status(out, status)}
+        out = [a for a in out if a["id_aluno"] not in fora]
     # pendencias (equivalentes aos filtros/formatacoes da aba ESCOLA)
     nomes = Counter(a["nome_norm"] for a in out)
     cpfs = Counter(a["cpf"] for a in out if a["cpf"] and a["cpf"] != DIVERGENTE)
@@ -172,47 +246,60 @@ def alunos_da_escola(con, escola, bases: Bases | None = None) -> list[dict]:
     return out
 
 
-def conferencia_status(con, escola, alunos: list[dict] | None = None) -> dict:
+def conferencia_status(con, escola, bases: Bases | None = None) -> dict:
     """Matriculados no sistema (GEDUC + cadastro individual) x base Alunos por status da mesma instituicao."""
-    alunos = alunos if alunos is not None else alunos_da_escola(con, escola)
-    alvo = {norm_nome(escola["geduc_nome"] or escola["nome"]), norm_nome(escola["nome"])}
-    status = [dict(r) for r in con.execute("SELECT * FROM status_alunos") if norm_nome(r["escola"]) in alvo]
+    bases = bases or Bases(con)
+    alunos = alunos_da_escola(con, escola, bases, todos=True)
+    status = status_da_escola(bases, escola)
+    so_status, so_sistema, nd = _casar_status(alunos, status)
+    desde = pelo_status(escola) if status else ""
+    fora = _fora_do_status(alunos, status) if desde else []
+    if desde:  # os que nao estao no Alunos por status ja nao contam como matriculados
+        ids = {a["id_aluno"] for a in fora}
+        so_sistema = []
+        nd = [x for x in nd if x[1]["id_aluno"] not in ids]
+    campos_s = ("aluno", "nascimento", "turma", "turno", "sexo", "mae", "pai", "cpf", "telefone", "matricula", "endereco",
+                "numero", "bairro", "situacao")
+    campos_a = ("id_aluno", "aluno", "dt_nasc", "turma", "turno", "manual")
 
-    def chave(nome, nasc):
-        return chave_nome(nome), (nasc or "")[:10]
-
-    sis = {chave(a["nome_norm"], a["dt_nasc"]) for a in alunos}
-    sis_nome = {chave_nome(a["nome_norm"]) for a in alunos}
-    st_keys = {chave(s["nome_norm"], s["nascimento"]) for s in status}
-    st_nome = {chave_nome(s["nome_norm"]) for s in status}
-
-    def casa(k, conj, conj_nome, tem_data):  # sem data de um dos lados, vale o nome
-        return k in conj or (not tem_data and k[0] in conj_nome)
-
-    so_status = []
-    for s in status:
-        if casa(chave(s["nome_norm"], s["nascimento"]), sis, sis_nome, bool(s["nascimento"])):
-            continue
+    def outra_escola(s):
         outra = [r["escola"] for r in con.execute("SELECT escola, dt_nasc FROM geduc WHERE nome_norm=?", (s["nome_norm"],))
                  if not s["nascimento"] or (r["dt_nasc"] or "")[:10] == s["nascimento"]]
-        so_status.append({**{k: s.get(k) or "" for k in ("aluno", "nascimento", "turma", "turno", "sexo", "mae", "pai", "cpf",
-                                                           "telefone", "matricula", "endereco", "numero", "bairro", "situacao")},
-                          "outra_escola": outra[0] if outra else ""})
-    so_sistema = [{k: a[k] for k in ("id_aluno", "aluno", "dt_nasc", "turma", "turno", "manual")} for a in alunos
-                  if status and not casa(chave(a["nome_norm"], a["dt_nasc"]), st_keys, st_nome, bool(a["dt_nasc"]))]
-    # mesmo aluno com o nome digitado de outro jeito: mesma data de nascimento e nome muito parecido
-    nome_diferente = []
-    for s in list(so_status):
-        cands = [(SequenceMatcher(None, chave_nome(s["aluno"]), chave_nome(a["aluno"])).ratio(), a) for a in so_sistema
-                 if s["nascimento"] and a["dt_nasc"] == s["nascimento"]]
-        sim, a = max(cands, key=lambda x: x[0], default=(0, None))
-        if a and sim >= 0.8:
-            nome_diferente.append({"status": s, "sistema": a, "similaridade": round(sim, 2)})
-            so_status.remove(s)
-            so_sistema.remove(a)
-    return {"total_sistema": len(alunos), "total_status": len(status),
-            "em_ambos": len(status) - len(so_status) - len(nome_diferente), "nome_diferente": nome_diferente,
-            "so_status": sorted(so_status, key=lambda x: x["aluno"]), "so_sistema": sorted(so_sistema, key=lambda x: x["aluno"])}
+        return outra[0] if outra else ""
+
+    so_status = [{**{k: s.get(k) or "" for k in campos_s}, "outra_escola": outra_escola(s)} for s in so_status]
+    so_sistema = [{k: a[k] for k in campos_a} for a in so_sistema]
+    return {"total_sistema": len(alunos) - len(fora), "total_status": len(status),
+            "em_ambos": len(status) - len(so_status) - len(nd),
+            "nome_diferente": [{"status": {k: s.get(k) or "" for k in campos_s}, "sistema": {k: a[k] for k in campos_a},
+                                "similaridade": sim} for s, a, sim in nd],
+            "so_status": sorted(so_status, key=lambda x: x["aluno"]), "so_sistema": sorted(so_sistema, key=lambda x: x["aluno"]),
+            "pelo_status": desde, "fora": sorted(({k: a[k] for k in campos_a} for a in fora), key=lambda x: x["aluno"])}
+
+
+def substituir_status(con, escola, recs: list[dict], arquivo: str) -> dict:
+    """Troca o Alunos por status so desta instituicao (as outras ficam como estao) e passa a contar como matriculados
+    apenas os alunos do arquivo. Linhas de outras instituicoes no arquivo sao ignoradas. Rode dentro de `with con`."""
+    from .importer import inserir
+
+    alvo = nomes_da_escola(escola)
+    nome = escola["geduc_nome"] or escola["nome"]
+    for r in recs:
+        if not norm_nome(r.get("escola")):
+            r["escola"] = nome
+    meus = [r for r in recs if norm_nome(r["escola"]) in alvo]
+    if not meus:
+        achadas = Counter(r["escola"] for r in recs).most_common(3)
+        raise ValueError(f"Nenhum aluno de {escola['nome']} no arquivo. Instituições encontradas: "
+                         + ", ".join(f"{e} ({n})" for e, n in achadas))
+    antigos = [(r["id"],) for r in con.execute("SELECT id, escola FROM status_alunos") if norm_nome(r["escola"]) in alvo]
+    con.executemany("DELETE FROM status_alunos WHERE id=?", antigos)
+    inserir(con, "status_alunos", meus)
+    con.execute("INSERT INTO importacoes (base, arquivo, linhas) VALUES (?,?,?)",
+                ("status_alunos", f"{arquivo} ({escola['nome']})", len(meus)))
+    con.execute("UPDATE escolas SET status_atualizado_em=? WHERE id=?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M"), escola["id"]))
+    return {"linhas": len(meus), "anteriores": len(antigos), "ignoradas": len(recs) - len(meus)}
 
 
 def resumo(alunos: list[dict]) -> dict:

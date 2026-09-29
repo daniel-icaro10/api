@@ -283,6 +283,20 @@ def _aba(wb, base: str):
     return next((wb[n] for n in wb.sheetnames if _h(n) == alvo), None)
 
 
+def inserir(con, base: str, recs: list[dict]):
+    """Grava os registros na base, sem apagar os que ja existem."""
+    cols = list(BASES[base][2].keys())
+    extra = ["nome_norm"] + (["escola_norm"] if base == "geduc" else [])
+    nome_col = NOME_COL[base]
+    linhas = ([r.get(c, "") for c in cols] + [norm_nome(r.get(nome_col))]
+              + ([norm_nome(r.get("escola"))] if base == "geduc" else []) for r in recs)
+    if hasattr(con, "copy_rows"):  # Postgres
+        con.copy_rows(base, cols + extra, linhas)
+    else:
+        sql = f"INSERT INTO {base} ({','.join(cols + extra)}) VALUES ({','.join('?' * (len(cols) + len(extra)))})"
+        con.executemany(sql, list(linhas))
+
+
 def save(con, base: str, recs: list[dict], arquivo: str) -> int:
     with con:
         if base == "escolas":
@@ -295,16 +309,7 @@ def save(con, base: str, recs: list[dict], arquivo: str) -> int:
                             (int(r["id"]), r["nome"], r.get("cod_smtt", ""), r.get("inep", "")))
         else:
             con.execute(f"DELETE FROM {base}")
-            cols = list(BASES[base][2].keys())
-            extra = ["nome_norm"] + (["escola_norm"] if base == "geduc" else [])
-            nome_col = NOME_COL[base]
-            linhas = ([r.get(c, "") for c in cols] + [norm_nome(r.get(nome_col))]
-                      + ([norm_nome(r.get("escola"))] if base == "geduc" else []) for r in recs)
-            if hasattr(con, "copy_rows"):  # Postgres
-                con.copy_rows(base, cols + extra, linhas)
-            else:
-                sql = f"INSERT INTO {base} ({','.join(cols + extra)}) VALUES ({','.join('?' * (len(cols) + len(extra)))})"
-                con.executemany(sql, list(linhas))
+            inserir(con, base, recs)
         con.execute("INSERT INTO importacoes (base, arquivo, linhas) VALUES (?,?,?)", (base, arquivo, len(recs)))
     return len(recs)
 

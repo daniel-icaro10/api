@@ -738,6 +738,46 @@ def conferencia(eid: int, u: dict = Depends(usuario)):
     return logic.conferencia_status(con, _escola(con, eid, u))
 
 
+@app.post("/api/escolas/{eid}/status")
+async def atualizar_status(eid: int, arquivo: UploadFile = File(...), u: dict = Depends(admin)):
+    """Zera o Alunos por status da instituicao e grava o do arquivo: os matriculados passam a ser so os alunos dele
+    (quem esta no GEDUC e nao esta no arquivo sai da contagem; quem falta no sistema vai para o cadastro individual)."""
+    data, nome = await arquivo.read(), arquivo.filename or "arquivo"
+    con = db.connect()
+    e = _escola(con, eid)
+    try:
+        recs = importer.read_file("status_alunos", nome, data)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    cur = con.execute("SELECT curso, grau FROM escola_cursos WHERE escola_id=? ORDER BY id", (eid,)).fetchone()
+    with con:
+        try:
+            r = logic.substituir_status(con, e, recs, nome)
+        except ValueError as ex:
+            raise HTTPException(400, str(ex))
+        novos = logic.conferencia_status(con, _escola(con, eid))["so_status"]
+        for s in novos:
+            cpf = norm_cpf(s["cpf"])
+            a = AlunoIn(aluno=s["aluno"], mae=s["mae"], pai=s["pai"], genero=s["sexo"][:1], dt_nasc=s["nascimento"],
+                        turma=s["turma"], turno=s["turno"], matricula=s["matricula"], rua=s["endereco"], numero=s["numero"],
+                        bairro=s["bairro"], cpf=cpf if len(cpf) == 11 else "", telefone=s["telefone"],
+                        **({"curso": cur["curso"], "grau": cur["grau"] or "1"} if cur else {}))
+            con.execute(f"""INSERT INTO alunos_manuais (escola_id, {', '.join(MANUAL_COLS)}, nome_norm)
+                            VALUES ({', '.join('?' * (len(MANUAL_COLS) + 2))})""", (eid, *_manual_vals(a)))
+    c = logic.conferencia_status(con, _escola(con, eid))
+    return {**r, "cadastrados": len(novos), "matriculados": c["total_sistema"], "fora": len(c["fora"])}
+
+
+@app.delete("/api/escolas/{eid}/status")
+def desfazer_status(eid: int, u: dict = Depends(admin)):
+    """Volta a contar os matriculados pelo GEDUC + cadastro individual (o Alunos por status gravado fica)."""
+    con = db.connect()
+    _escola(con, eid)
+    with con:
+        con.execute("UPDATE escolas SET status_atualizado_em='' WHERE id=?", (eid,))
+    return {"ok": True}
+
+
 @app.get("/api/escolas/{eid}/alunos")
 def alunos(eid: int, u: dict = Depends(usuario)):
     con = db.connect()

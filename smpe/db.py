@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS importacoes (
 
 # colunas incluidas depois da primeira versao do banco
 COLUNAS_NOVAS = [("lotes", "num_remessa", "INTEGER"), ("escolas", "bloqueado", "INTEGER DEFAULT 0"),
-                 ("escolas", "motivo_bloqueio", "TEXT DEFAULT ''"), ("geduc", "telefone", "TEXT"),
+                 ("escolas", "motivo_bloqueio", "TEXT DEFAULT ''"), ("escolas", "status_atualizado_em", "TEXT DEFAULT ''"), ("geduc", "telefone", "TEXT"),
                  ("sessoes", "escola_id", "INTEGER")] + [
     ("ajustes", c, "TEXT") for c in ("aluno", "pai", "genero", "dt_nasc", "ano_serie", "turno", "turma", "matricula",
                                      "rua", "numero", "bairro", "cidade", "cep", "grau", "curso")] + [

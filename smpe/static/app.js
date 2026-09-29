@@ -318,6 +318,7 @@ async function migracao(eid) {
       <span class="muted">Cód. SMTT <b class="mono">${esc(e.cod_smtt) || "—"}</b> · INEP <b class="mono">${esc(e.inep) || "—"}</b></span>
       <span class="spacer"></span>
       <button id="btnNovoAluno">Cadastrar aluno</button>
+      <button id="btnStatus" data-admin title="Zera os matriculados e atualiza com o arquivo Alunos por status da instituição">Atualizar pelo Alunos por status</button>
       <a class="btn" href="#/relatorios/${eid}">Relatórios</a><a class="btn" href="#/orcamento/${eid}" data-admin>Orçamento</a></div>
     ${!r.matriculados ? `<div class="alert warn">Nenhum aluno do GEDUC encontrado para esta instituição.${ehAdmin() ? ` Ajuste o <b>vínculo GEDUC</b> em <a href="#/escolas">Instituições</a>.` : ""}</div>` : ""}
     ${!e.cod_smtt ? `<div class="alert warn">Instituição sem código SMTT: a remessa exige o código da instituição (4 dígitos).</div>` : ""}
@@ -351,6 +352,7 @@ async function migracao(eid) {
   $("#chkAll").onchange = ev => { visiveis().forEach(a => ev.target.checked ? MIG.sel.add(a.id_aluno) : MIG.sel.delete(a.id_aluno)); renderAlunos(); };
   $("#btnRemessa").onclick = () => previaRemessa(eid, [...MIG.sel]);
   $("#btnNovoAluno").onclick = () => novoAluno(eid);
+  $("#btnStatus").onclick = () => modalAtualizarStatus(eid, e);
   XLS.alunos = () => ({titulo: `Matriculados - ${e.nome}`,
     subtitulo: [FILTROS.find(x => x[0] === MIG.filtro)[1], MIG.turma && `Turma ${MIG.turma}`, MIG.q && `Busca: ${MIG.q}`].filter(Boolean).join(" · "),
     colunas: [["ID aluno"], ["Aluno"], ["Nascimento", "data"], ["Turma"], ["Turno"], ["Mãe"], ["CPF consolidado", "cpf"], ["Pendências"], ["Apto"],
@@ -370,16 +372,21 @@ async function conferenciaStatus(eid) {
   try { c = await api(`/api/escolas/${eid}/conferencia`, {semLogin: true}); } catch { return; }
   const box = $("#confStatus");
   if (!box || !c.total_status || MIG?.eid !== eid) return;
-  const fora = c.so_status.filter(x => !x.outra_escola).length, outra = c.so_status.length - fora;
+  const semGeduc = c.so_status.filter(x => !x.outra_escola).length, outra = c.so_status.length - semGeduc;
   const nd = c.nome_diferente || [];
+  const fora = c.fora || [];
+  const pelo = c.pelo_status ? `Matriculados conforme o <b>Alunos por status</b> atualizado em ${fmtDH(c.pelo_status)}.
+    ${fora.length ? `${fmtN(fora.length)} aluno(s) do GEDUC ou do cadastro individual não estão no arquivo e ficaram fora da contagem.` : ""}` : "";
   if (!c.so_status.length && !c.so_sistema.length && !nd.length) {
-    box.innerHTML = `<div class="alert info">Confere com o <b>Alunos por status</b>: ${fmtN(c.total_status)} aluno(s) nas duas bases.</div>`;
+    box.innerHTML = `<div class="alert info conf"><div>${pelo || `Confere com o <b>Alunos por status</b>: ${fmtN(c.total_status)} aluno(s) nas duas bases.`}</div>
+      ${fora.length ? `<button class="btn-sm" id="verConf">Ver fora da contagem</button>` : ""}</div>`;
+    if (fora.length) $("#verConf").onclick = () => modalConferencia(eid, c);
     return;
   }
   box.innerHTML = `<div class="alert warn conf"><div><b>Matriculados diferentes do Alunos por status.</b>
       O sistema tem <b>${fmtN(c.total_sistema)}</b> matriculado(s) (GEDUC + cadastro individual) e o Alunos por status da instituição tem <b>${fmtN(c.total_status)}</b>.
-      ${fmtN(c.em_ambos)} estão nas duas bases.<br>
-      Só no Alunos por status: <b>${fmtN(c.so_status.length)}</b>${c.so_status.length ? ` (${fmtN(fora)} fora do GEDUC, ${fmtN(outra)} no GEDUC de outra instituição)` : ""} ·
+      ${fmtN(c.em_ambos)} estão nas duas bases.${pelo ? `<br>${pelo}` : ""}<br>
+      Só no Alunos por status: <b>${fmtN(c.so_status.length)}</b>${c.so_status.length ? ` (${fmtN(semGeduc)} fora do GEDUC, ${fmtN(outra)} no GEDUC de outra instituição)` : ""} ·
       Só no sistema: <b>${fmtN(c.so_sistema.length)}</b>${nd.length ? ` · Mesmo aluno com o nome escrito diferente: <b>${fmtN(nd.length)}</b>` : ""}</div>
       <button class="btn-sm" id="verConf">Ver diferenças</button></div>`;
   $("#verConf").onclick = () => modalConferencia(eid, c);
@@ -411,6 +418,9 @@ function modalConferencia(eid, c) {
       <div class="row" style="margin-bottom:8px"><h3 style="margin:0">Só no Alunos por status (${fmtN(c.so_status.length)})</h3><span class="spacer"></span>${c.so_status.length ? btnXls("conf_status") : ""}</div>
       ${c.so_status.length ? `<table class="tb-conf"><thead><tr><th>Aluno / mãe</th><th>Nasc.</th><th>Turma</th><th>CPF</th><th>GEDUC</th><th></th></tr></thead><tbody>${c.so_status.map(linhaS).join("")}</tbody></table>
         <p class="muted">“Cadastrar” cria o aluno no <b>cadastro individual</b> desta instituição com os dados do Alunos por status. Confira antes os que aparecem no GEDUC de outra instituição (podem ser transferências).</p>` : `<p class="muted">Nenhum.</p>`}
+      ${(c.fora || []).length ? `<div class="row" style="margin:18px 0 8px"><h3 style="margin:0">Fora da contagem (${fmtN(c.fora.length)})</h3></div>
+        <table><thead><tr><th>Aluno</th><th>Nasc.</th><th>Turma</th><th>Origem</th></tr></thead><tbody>${c.fora.map(a => `<tr class="click" data-al="${esc(a.id_aluno)}"><td><b>${esc(a.aluno)}</b></td><td>${fmtData(a.dt_nasc)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td><td>${a.manual ? "Cadastro individual" : "GEDUC"}</td></tr>`).join("")}</tbody></table>
+        <p class="muted">Não estão no Alunos por status atualizado em ${fmtDH(c.pelo_status)} (ou estão repetidos) e não contam como matriculados.</p>` : ""}
       <div class="row" style="margin:18px 0 8px"><h3 style="margin:0">Só no sistema (${fmtN(c.so_sistema.length)})</h3><span class="spacer"></span>${c.so_sistema.length ? btnXls("conf_sistema") : ""}</div>
       ${c.so_sistema.length ? `<table><thead><tr><th>Aluno</th><th>Nasc.</th><th>Turma</th><th>Origem</th></tr></thead><tbody>${c.so_sistema.map(a => `<tr class="click" data-al="${esc(a.id_aluno)}"><td><b>${esc(a.aluno)}</b></td><td>${fmtData(a.dt_nasc)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td><td>${a.manual ? "Cadastro individual" : "GEDUC"}</td></tr>`).join("")}</tbody></table>
         <p class="muted">Podem ter saído da instituição ou estar com o nome ou a data de nascimento diferente no Alunos por status. Clique para abrir o aluno.</p>` : `<p class="muted">Nenhum.</p>`}
@@ -443,6 +453,37 @@ function modalConferencia(eid, c) {
     } catch { b.disabled = false; }
   };
   $("#modal").addEventListener("close", () => { if (cadastrados.size && MIG?.eid === eid) migracao(eid); }, {once: true});
+}
+// botao da tela Matriculado: troca o Alunos por status so desta instituicao e os matriculados passam a ser os do arquivo
+function modalAtualizarStatus(eid, e) {
+  modal(`<div class="mh"><h2>Atualizar pelo Alunos por status</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <div class="mb"><p style="margin-top:0">${esc(e.nome)}</p>
+      <p class="muted">Zera o Alunos por status <b>desta instituição</b> e grava o do arquivo. Os matriculados passam a ser só os alunos do arquivo:</p>
+      <ul class="muted"><li>quem está no GEDUC ou no cadastro individual e não está no arquivo sai da contagem (não é apagado);</li>
+        <li>quem está no arquivo e falta no sistema é incluído no cadastro individual;</li>
+        <li>as outras instituições não mudam. Continua valendo quando o GEDUC for importado de novo.</li></ul>
+      ${e.status_atualizado_em ? `<div class="alert info">Atualizado pela última vez em ${fmtDH(e.status_atualizado_em)}.
+        <button class="btn-sm" id="btnDesfazerSt">Voltar a contar pelo GEDUC</button></div>` : ""}
+      <form id="fStatus" class="row" style="align-items:flex-end"><div style="flex:1"><label>Arquivo Alunos por status (.xlsx, .xls ou .csv)</label>
+        <input type="file" name="arquivo" accept=".xlsx,.xlsm,.xls,.csv" required></div>
+        <button class="primary">Zerar e atualizar</button></form><div id="stMsg"></div></div>`);
+  $("#fStatus").onsubmit = async ev => {
+    ev.preventDefault();
+    if (!confirm(`Zerar os matriculados de ${e.nome} e atualizar com este arquivo?`)) return;
+    const b = ev.target.querySelector("button"); b.disabled = true;
+    $("#stMsg").innerHTML = `<div class="alert info">Processando…</div>`;
+    try {
+      const r = await api(`/api/escolas/${eid}/status`, {method: "POST", body: new FormData(ev.target)});
+      closeModal();
+      toast(`${fmtN(r.matriculados)} matriculado(s): ${fmtN(r.linhas)} no arquivo, ${fmtN(r.cadastrados)} incluído(s), ${fmtN(r.fora)} fora da contagem`
+        + (r.ignoradas ? ` · ${fmtN(r.ignoradas)} linha(s) de outras instituições ignoradas` : ""));
+      migracao(eid);
+    } catch (ex) { $("#stMsg").innerHTML = `<div class="alert warn">${esc(ex.message)}</div>`; b.disabled = false; }
+  };
+  if ($("#btnDesfazerSt")) $("#btnDesfazerSt").onclick = async () => {
+    if (!confirm("Voltar a contar os matriculados pelo GEDUC + cadastro individual?")) return;
+    await api(`/api/escolas/${eid}/status`, {method: "DELETE"}); closeModal(); toast("Matriculados voltaram a seguir o GEDUC"); migracao(eid);
+  };
 }
 function visiveis() {
   const f = FILTROS.find(x => x[0] === MIG.filtro)[2];
