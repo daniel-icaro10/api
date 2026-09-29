@@ -1,7 +1,8 @@
 """CLI:
   python -m smpe importar "C:\\caminho\\SIS SMPE 2026.4.xlsm"   # importa todas as abas
   python -m smpe web [--porta 8010]
-  python -m smpe migrar data\\smpe.db [--substituir]   # copia o SQLite para o Postgres de DATABASE_URL
+  python -m smpe migrar data\\smpe.db [--substituir]          # copia um SQLite para o Postgres de DATABASE_URL
+  python -m smpe migrar "postgresql://..." [--substituir]    # copia outro Postgres (ex.: Render -> VPS)
 """
 import argparse
 import sys
@@ -14,8 +15,8 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("importar", help="importa a planilha SIS SMPE completa")
     i.add_argument("arquivo")
-    m = sub.add_parser("migrar", help="copia um banco SQLite para o Postgres de DATABASE_URL")
-    m.add_argument("arquivo")
+    m = sub.add_parser("migrar", help="copia um SQLite ou outro Postgres para o Postgres de DATABASE_URL")
+    m.add_argument("arquivo", help="arquivo SQLite (data/smpe.db) ou URL do Postgres de origem")
     m.add_argument("--substituir", action="store_true", help="apaga o que ja existe no Postgres")
     w = sub.add_parser("web", help="abre o sistema")
     w.add_argument("--porta", type=int, default=8010)

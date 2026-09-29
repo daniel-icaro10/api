@@ -1,0 +1,17 @@
+# Servico do SIS SMPE (systemd). O instalar.sh troca USUARIO pelo usuario do cPanel e copia para
+# /etc/systemd/system/smpe.service. Um unico processo (--workers 1): o andamento da importacao fica na memoria.
+[Unit]
+Description=SIS SMPE - migracao de estudantes SMTT
+After=network.target postgresql.service
+
+[Service]
+User=USUARIO
+Group=USUARIO
+WorkingDirectory=/home/USUARIO/sis-smpe
+EnvironmentFile=/home/USUARIO/sis-smpe/deploy/smpe.env
+ExecStart=/home/USUARIO/sis-smpe/.venv/bin/uvicorn smpe.web:app --host 127.0.0.1 --port 8010 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

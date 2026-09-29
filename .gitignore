@@ -11,3 +11,4 @@ data/
 *.csv
 migracao/
 modelo*.pdf
+deploy/smpe.env

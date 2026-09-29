@@ -25,6 +25,8 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 - O usuário é o **e-mail** (maiúsculas e minúsculas não fazem diferença). Todo usuário novo, inclusive o primeiro administrador, precisa ter um e-mail válido. Logins antigos (CPF ou outro formato) continuam funcionando até o administrador trocá-los pelo e-mail em **Usuários**.
 - A sessão termina quando o navegador é fechado e dura no máximo 12 horas. As senhas são guardadas com hash PBKDF2.
 
+**Publicar numa VPS com cPanel/WHM (Hostinger)**: veja [deploy/LEIA-ME-VPS.md](deploy/LEIA-ME-VPS.md). O sistema roda como serviço (`deploy/smpe.service`), o Apache do cPanel encaminha o domínio para ele e os dados do Render são copiados com `python -m smpe migrar "URL-do-Postgres-de-origem"`.
+
 Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2026.4.xlsm"`
 
 ## Equivalência planilha → sistema
