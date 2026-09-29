@@ -497,20 +497,29 @@ def _inteiro(v) -> int | None:
     return n
 
 
+MAX_SALAS = 150  # por tipo de ensino e turno: acima disso e numero de alunos digitado no lugar de salas
+
+
 def _ficha_limpa(f: dict) -> str:
     """So as chaves conhecidas da ficha da instituicao, com numeros e datas validados."""
     salas = {}
-    for k in TIPOS_ENSINO:
+    for i, k in enumerate(TIPOS_ENSINO):
         s = (f.get("salas") or {}).get(k) or {}
-        v = {t: n for t in fichas.TURNOS + ["salas"] if (n := _inteiro(s.get(t))) is not None}
+        v = {t: n for t in fichas.TURNOS if (n := _inteiro(s.get(t))) is not None and n}
+        for t, n in v.items():
+            if n > MAX_SALAS:
+                raise HTTPException(400, f"{fichas.TIPOS_ENSINO[i]} ({t}): {n} salas. Informe a quantidade de SALAS de aula "
+                                         "usadas em cada turno, não o número de alunos")
         if v:
-            salas[k] = v
+            salas[k] = v  # o N. de salas e a soma dos turnos (calculado na ficha)
     compl = {}
     for k in fichas.COMPLEMENTARES:
         s = (f.get("complementares") or {}).get(k) or {}
         v = {t: n for t in fichas.TURNOS if (n := _inteiro(s.get(t))) is not None}
         if v:
             compl[k] = v
+    if salas:  # "Salas de aula" por turno = soma do quadro de salas por tipo de ensino
+        compl["salas"] = {t: n for t in fichas.TURNOS if (n := sum(s.get(t, 0) for s in salas.values()))}
     docs = {}
     for k in fichas.DOCUMENTOS:
         d = (f.get("documentos") or {}).get(k) or {}

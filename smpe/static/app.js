@@ -743,8 +743,11 @@ function paneEstrutura(fc) {
   const salas = fc.salas || {}, compl = fc.complementares || {}, docs = fc.documentos || {};
   return `<p class="muted" style="margin-top:0">Quadros da <b>Ficha de cadastro da instituição de ensino</b>. Deixe em branco o que não se aplica.</p>
     <h3>Tipo de ensino e quantidade de salas por turno</h3>
+    <div class="alert info" style="margin-bottom:10px">Informe <b>quantas salas de aula</b> cada tipo de ensino usa em cada turno (não o número de alunos).
+      O <b>Nº salas</b> é a soma dos turnos, e a linha <b>Salas de aula</b> das informações complementares é preenchida a partir deste quadro.</div>
     <div class="table-wrap" style="max-height:none"><table class="grade"><thead><tr><th>Tipo de ensino</th>${TURNOS.map(([, l]) => `<th>${l}</th>`).join("")}<th>Nº salas</th></tr></thead><tbody>
-      ${TIPOS_FICHA.map((t, i) => `<tr><td>${t}</td>${[...T4, "salas"].map(k => `<td>${numIn(`data-sala="${i + 1}" data-t="${k}"`, salas[i + 1]?.[k])}</td>`).join("")}</tr>`).join("")}
+      ${TIPOS_FICHA.map((t, i) => `<tr><td>${t}</td>${T4.map(k => `<td>${numIn(`data-sala="${i + 1}" data-t="${k}" max="150"`, salas[i + 1]?.[k])}</td>`).join("")}<td class="num"><b data-nsalas="${i + 1}"></b></td></tr>`).join("")}
+      <tr class="soma"><td>Total por turno</td>${T4.map(tn => `<td class="num"><b data-tsala="${tn}"></b></td>`).join("")}<td class="num"><b data-tsala="total"></b></td></tr>
     </tbody></table></div>
     <h3>Informações complementares sobre a instituição</h3>
     <div class="table-wrap" style="max-height:none"><table class="grade"><thead><tr><th>Quantidade de</th>${TURNOS.map(([, l]) => `<th>${l}</th>`).join("")}<th>Total</th></tr></thead><tbody>
@@ -807,11 +810,29 @@ async function editarEscola(id) {
   $("#addCurso").onclick = () => { $("#cursoList").insertAdjacentHTML("beforeend", cursoRow()); contar(); $("#cursoList .curso-row:last-child input").focus(); };
   f.addEventListener("click", ev => { if (ev.target.matches(".sub-del")) { ev.target.closest(".sub-row").remove(); contar(); } });
   // totais das informacoes complementares
-  const totais = () => COMPLEMENTARES.forEach(([k]) => {
-    const s = $$(`[data-compl="${k}"]`, f).reduce((a, i) => a + (+i.value || 0), 0), vazio = $$(`[data-compl="${k}"]`, f).every(i => i.value === "");
-    $(`[data-tot="${k}"]`, f).textContent = vazio ? "" : fmtN(s);
-  });
-  f.addEventListener("input", ev => { if (ev.target.dataset.compl) totais(); });
+  const totais = () => {
+    // quadro de salas: N. salas = soma dos turnos; "Salas de aula" (complementares) = soma de cada turno no quadro
+    const salas = $$("[data-sala]", f), temSalas = salas.some(i => i.value !== "");
+    salas.forEach(x => x.setCustomValidity(+x.value > 150 ? "Informe a quantidade de SALAS de aula neste turno, não o número de alunos" : ""));
+    TIPOS_FICHA.forEach((_, i) => {
+      const cel = salas.filter(x => x.dataset.sala === String(i + 1)), s = cel.reduce((a, x) => a + (+x.value || 0), 0);
+      $(`[data-nsalas="${i + 1}"]`, f).textContent = s ? fmtN(s) : "";
+    });
+    T4.forEach(tn => {
+      const s = salas.filter(x => x.dataset.t === tn).reduce((a, x) => a + (+x.value || 0), 0);
+      $(`[data-tsala="${tn}"]`, f).textContent = s ? fmtN(s) : "";
+      const c = $(`[data-compl="salas"][data-t="${tn}"]`, f);
+      c.readOnly = temSalas; c.title = temSalas ? "Calculado a partir do quadro de salas por tipo de ensino" : "";
+      if (temSalas) c.value = s || "";
+    });
+    const tot = salas.reduce((a, x) => a + (+x.value || 0), 0);
+    $('[data-tsala="total"]', f).textContent = tot ? fmtN(tot) : "";
+    COMPLEMENTARES.forEach(([k]) => {
+      const s = $$(`[data-compl="${k}"]`, f).reduce((a, i) => a + (+i.value || 0), 0), vazio = $$(`[data-compl="${k}"]`, f).every(i => i.value === "");
+      $(`[data-tot="${k}"]`, f).textContent = vazio ? "" : fmtN(s);
+    });
+  };
+  f.addEventListener("input", ev => { if (ev.target.dataset.compl || ev.target.dataset.sala) totais(); });
   totais(); contar();
   $("#alunosGeduc").onclick = async () => {
     if (!id) return toast("Salve a instituição antes de buscar os alunos");

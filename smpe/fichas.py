@@ -41,6 +41,13 @@ def _fmt_cep(c: str) -> str:
     return f"{c[:5]}-{c[5:]}" if len(c or "") == 8 else (c or "")
 
 
+def _int(v) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _num(v) -> str:
     try:
         n = int(v)
@@ -129,10 +136,13 @@ def ficha_instituicao(e: dict) -> bytes:
         for i in range(10):
             s = salas.get(str(i + 1)) or {}
             vals = [_num(s.get(k)) for k in TURNOS]
-            total = _num(s.get("salas")) or (_num(sum(int(v) for v in vals if v)) if any(vals) else "")
+            total = str(sum(int(v) for v in vals if v)) if any(vals) else ""  # N. salas = soma dos turnos
             for x, v in zip(SALAS_X[i // 5], vals + [total]):
                 t.centro(x, REDE_Y[i % 5], v)
-        compl = ficha.get("complementares") or {}
+        compl = {**(ficha.get("complementares") or {})}
+        if salas:  # "Salas de aula" por turno = soma do quadro de salas por tipo de ensino
+            compl["salas"] = {tn: sum(_int(s.get(tn)) for s in salas.values()) for tn in TURNOS}
+            compl["salas"] = {tn: v for tn, v in compl["salas"].items() if v}
         for y, k in zip(COMPL_Y, COMPLEMENTARES):
             s = compl.get(k) or {}
             vals = [_num(s.get(tn)) for tn in TURNOS]
