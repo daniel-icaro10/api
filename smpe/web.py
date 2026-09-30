@@ -1,4 +1,5 @@
 """API + telas do SIS SMPE."""
+import codecs
 import difflib
 import hashlib
 import hmac
@@ -1060,7 +1061,8 @@ def lote_alunos(lid: int, u: dict = Depends(usuario)):
 def baixar_lote(lid: int, u: dict = Depends(usuario)):
     con = db.connect()
     r = _lote(con, lid, u)
-    return Response(bytes(r["conteudo"]), media_type="text/plain; charset=utf-8",
+    conteudo = bytes(r["conteudo"]).removeprefix(codecs.BOM_UTF8)  # remessas antigas foram gravadas com BOM
+    return Response(conteudo, media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{r["arquivo"]}"'})
 
 

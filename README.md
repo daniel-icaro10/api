@@ -97,7 +97,8 @@ Na Migração, o aluno que seria rejeitado recebe a pendência **Crítica SMTT**
 
 Ressalvas:
 - A regra 13 é uma aproximação. O validador não expõe o critério em texto, então o sistema trata como inválido o nome do pai que tiver dígitos ou símbolos.
-- O BOM do UTF-8 pode ser desligado com a configuração `remessa_bom=0`.
+- A remessa é gravada em UTF-8 **sem BOM**: o validador oficial conta o BOM como caractere e reprova a primeira linha (376 colunas).
+- Só entram na remessa os alunos com situação **Cursando** no Alunos por status. Quem tem outra situação (transferido, desistente etc.) recebe a pendência **Não cursando**. O aluno sem situação conhecida não é bloqueado.
 
 Na importação, o sistema corrige automaticamente os nomes com acentuação corrompida na origem (por exemplo, "ANTÃ”NIO" vira "ANTÔNIO").
 

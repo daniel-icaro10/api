@@ -140,6 +140,7 @@ const PEND = {
   cpf_duplicado: ["CPF duplicado", "b-err"], nome_duplicado: ["Nome duplicado", "b-warn"], sem_mae: ["Sem mãe", "b-warn"],
   mae_incompleta: ["Mãe sem sobrenome", "b-warn"],
   critica_smtt: ["Crítica SMTT", "b-err"],
+  nao_cursando: ["Não cursando", "b-err"],
 };
 // legenda do validador oficial SMPE (AlunoCriticaUtf8.exe)
 const LEGENDA = {0: "Instituição deve ser informada e ser um número inteiro", 1: "Nome do aluno deve ser informado",
@@ -298,6 +299,7 @@ const FILTROS = [
   ["sem_mae", "Sem mãe", a => a.pendencias.includes("sem_mae")],
   ["mae_incompleta", "Mãe sem sobrenome", a => a.pendencias.includes("mae_incompleta")],
   ["critica_smtt", "Crítica SMTT", a => a.pendencias.includes("critica_smtt")],
+  ["nao_cursando", "Não cursando", a => a.pendencias.includes("nao_cursando")],
   ["manuais", "Cadastro individual", a => a.manual],
 ];
 let MIG = null;

@@ -116,8 +116,8 @@ def criticar_arquivo(data: bytes, nome_arquivo: str = "") -> dict:
     gerais = []
     if not info["utf8"]:
         gerais.append("ESTE SISTEMA SUPORTA APENAS ARQUIVO NO FORMATO UTF8 (arquivo nao e UTF-8 valido)")
-    elif not info["bom"] and any(ord(ch) > 127 for ch in texto):
-        gerais.append("Arquivo UTF-8 sem BOM com caracteres acentuados: o validador pode nao reconhecer a codificacao")
+    elif info["bom"]:
+        gerais.append("Arquivo com BOM UTF-8: o validador oficial conta o BOM e reprova a 1a linha (376 colunas)")
     m = re.match(r"^INST_(\d+)_REM_(\d+)\.txt$", nome_arquivo or "", re.I)
     if nome_arquivo and not m:
         gerais.append("Nome fora do padrao INST_<codigo>_REM_<numero>.txt")
@@ -134,13 +134,14 @@ def criticar_arquivo(data: bytes, nome_arquivo: str = "") -> dict:
             continue
         campos = parse_linha(linha)
         cod = criticar_campos(campos)
-        if len(linha) != TAM_LINHA:
+        colunas = len(linha) + (1 if n == 1 and info["bom"] else 0)  # o validador oficial conta o BOM
+        if colunas != TAM_LINHA:
             cod.append(17)
         cpf = campos["CPF"].strip()
         if cpf:
             cpfs.setdefault(cpf, []).append(len(registros))
         registros.append({"linha": n, "campos": {k: v.strip() for k, v in campos.items()}, "codigos": cod,
-                          "branco": False, "colunas": len(linha)})
+                          "branco": False, "colunas": colunas})
     for idxs in cpfs.values():
         if len(idxs) > 1:
             for i in idxs:

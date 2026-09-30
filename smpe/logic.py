@@ -2,7 +2,6 @@
 import re
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
-import codecs
 from datetime import datetime
 
 from . import db
@@ -168,6 +167,12 @@ def _fora_do_status(alunos: list[dict], status: list[dict]) -> list[dict]:
     return fora
 
 
+def cursando(a: dict) -> bool:
+    """So migra quem esta com situacao CURSANDO no Alunos por status (sem situacao conhecida nao bloqueia)."""
+    s = sem_acento(a.get("situacao") or "").upper().strip()
+    return not s or s == "CURSANDO"
+
+
 def alunos_da_escola(con, escola, bases: Bases | None = None, todos: bool = False) -> list[dict]:
     """Matriculados: GEDUC + cadastro individual; se a instituicao foi atualizada pelo Alunos por status, so os que
     estao nele (todos=True ignora esse filtro)."""
@@ -240,9 +245,11 @@ def alunos_da_escola(con, escola, bases: Bases | None = None, todos: bool = Fals
         a["criticas"] = [x for x in criticar_campos(campos_remessa(escola, a)) if x not in (0, 2, 14, 16, 18)]
         if a["criticas"]:
             p.append("critica_smtt")
+        if not cursando(a):
+            p.append("nao_cursando")
         a["pendencias"] = p
         a["apto"] = (a["cpf"] not in ("", DIVERGENTE) and not a["criticas"]
-                     and not {"cpf_invalido", "cpf_duplicado", "sem_mae", "mae_incompleta"} & set(p))
+                     and not {"cpf_invalido", "cpf_duplicado", "sem_mae", "mae_incompleta", "nao_cursando"} & set(p))
     return out
 
 
@@ -401,9 +408,12 @@ def gerar_remessa(con, escola, ids: list[str], remover_acentos: bool = True) -> 
             cods.append(14)
         elif "cpf_duplicado" in a["pendencias"]:
             cods.append(15)
+        erros = [f"({x}) {LEGENDA[x]}" for x in sorted(set(cods))]
+        if not cursando(a):
+            erros.append(f"Situação {a['situacao']}: só alunos cursando entram na remessa")
         linhas.append(linha)
         itens.append({"id_aluno": i, "aluno": a["aluno"], "cpf": a["cpf"], "campos": campos, "avisos": avisos,
-                      "codigos": sorted(set(cods)), "erros": [f"({x}) {LEGENDA[x]}" for x in sorted(set(cods))]})
+                      "codigos": sorted(set(cods)), "erros": erros})
     # CPF repetido dentro da propria remessa (critica 15)
     vistos = {}
     for it in itens:
@@ -422,11 +432,10 @@ def salvar_lote(con, escola, remessa: dict) -> int:
     validos = [i for i in remessa["itens"] if not i["erros"]]
     if not validos:
         raise ValueError("Nenhum aluno apto na selecao")
-    # o validador oficial so aceita UTF-8 (AlunoCriticaUtf8); BOM configuravel (padrao: com BOM)
+    # UTF-8 SEM BOM: o validador oficial (AlunoCriticaUtf8) conta o BOM como caractere e reprova a 1a linha
+    # com 376 colunas; sem acentos o arquivo e ASCII puro
     linhas = [linha_remessa(i["campos"], True)[0] for i in validos]
     conteudo = ("\r\n".join(linhas) + "\r\n").encode("utf-8")
-    if db.get_config(con, "remessa_bom", "1") == "1":
-        conteudo = codecs.BOM_UTF8 + conteudo
     seq = con.execute("SELECT COALESCE(MAX(num_remessa), 0) + 1 FROM lotes WHERE escola_id=?",
                       (escola["id"],)).fetchone()[0]
     nome = f"INST_{so_digitos(escola['cod_smtt']).zfill(4)}_REM_{seq:02d}.txt"
