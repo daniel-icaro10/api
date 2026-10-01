@@ -59,6 +59,7 @@ $("#drawer").addEventListener("click", e => { if (e.target.id === "drawer") clos
 // ------------------------------------------------------------------ acesso (admin / instituicao)
 let SESSAO = null, PUBLICO = {};
 const ehAdmin = () => SESSAO?.perfil === "admin";
+const ehRH = () => SESSAO?.perfil === "rh";
 const iniciais = n => (n || "?").split(/\s+/).filter(w => w.length > 2).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
 const waLink = n => `https://wa.me/${n.length <= 11 ? "55" + n : n}`;
 function mostrarLogin(msg = "") {
@@ -82,10 +83,11 @@ $("#loginForm").onsubmit = async ev => {
 };
 function entrar() {
   $("#login").hidden = true;
-  document.body.classList.toggle("inst", !ehAdmin());
-  const nome = ehAdmin() ? "Administrador" : SESSAO.escola_nome;
+  document.body.classList.toggle("inst", SESSAO.perfil === "instituicao");
+  document.body.classList.toggle("rh", ehRH());
+  const nome = ehAdmin() ? "Administrador" : ehRH() ? "Recursos Humanos" : SESSAO.escola_nome;
   $("#userNome").textContent = nome; $("#userNome").title = nome;
-  $("#userPerfil").textContent = ehAdmin() ? `${fmtLogin(SESSAO.login)} · acesso total` : `Instituição · ${fmtLogin(SESSAO.login)}`;
+  $("#userPerfil").textContent = ehAdmin() ? `${fmtLogin(SESSAO.login)} · acesso total` : ehRH() ? `RH · ${fmtLogin(SESSAO.login)}` : `Instituição · ${fmtLogin(SESSAO.login)}`;
   $("#userAv").textContent = iniciais(nome);
   $("#buscaInput").placeholder = ehAdmin() ? "Localizar estudante por nome ou CPF…" : "Localizar estudante da instituição…";
   const escs = SESSAO.escolas || [];
@@ -209,21 +211,28 @@ const ultimaEscola = () => {
 };
 
 // ------------------------------------------------------------------ roteador
-const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config, usuarios};
+const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config, usuarios,
+  servidores, frequencia, aniversariantes, feriados};
 const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config", "usuarios"]);
+const DO_RH = new Set(["servidores", "frequencia", "aniversariantes", "feriados"]);  // perfil RH (e o administrador)
 const TITLES = {painel: "Painel", migracao: "Matriculado", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
   relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante", config: "Configurações",
-  usuarios: "Usuários"};
+  usuarios: "Usuários", servidores: "Servidores", frequencia: "Folha de frequência", aniversariantes: "Aniversariantes do mês",
+  feriados: "Feriados e pontos facultativos"};
 const CRUMBS = {painel: "Visão geral da migração nas instituições", migracao: "Alunos matriculados · cruzamento de CPF GEDUC × Censo × SMTT × Status",
   escolas: "Instituições de ensino, acesso e vínculo com o GEDUC", remessas: "Arquivos enviados ao banco de dados da SMTT", critica: "Mesmas regras do validador oficial SMPE (AlunoCritica)",
   relatorios: "Listas para conferência e preenchimento pela instituição", orcamento: "Valores por instituição (somente alunos com CPF)",
   bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte e orçamento",
-  usuarios: "Logins, perfis e instituições vinculadas"};
+  usuarios: "Logins, perfis e instituições vinculadas", servidores: "Cadastro dos servidores da SEMED (base GEDUC + RH)",
+  frequencia: "Registro individual de frequência por mês", aniversariantes: "Lista e etiquetas dos aniversariantes",
+  feriados: "Datas marcadas em vermelho na folha de frequência"};
 async function router() {
   if (!SESSAO) return;
   const [path, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
   let [nome = "painel", arg] = path.split("/");
   if (SO_ADMIN.has(nome) && !ehAdmin()) nome = "painel";
+  if (ehRH() && !DO_RH.has(nome)) nome = "servidores";
+  if (DO_RH.has(nome) && !ehAdmin() && !ehRH()) nome = "painel";
   const fn = ROUTES[nome] || painel;
   $$("#nav a").forEach(a => a.classList.toggle("active", a.dataset.r === nome));
   $("#title").textContent = TITLES[nome] || "Painel";
@@ -231,7 +240,7 @@ async function router() {
   $(".side").classList.remove("open");
   closeDrawer();
   $("#view").innerHTML = `<div class="empty">Carregando…</div>`;
-  if (!ESCOLAS.length) await loadEscolas();
+  if (!ESCOLAS.length && !ehRH()) await loadEscolas();
   try { await fn(arg, new URLSearchParams(qs)); }
   catch (e) { $("#view").innerHTML = `<div class="empty">Não foi possível carregar: ${esc(e.message)}</div>`; }
 }
@@ -1137,9 +1146,9 @@ async function bases() {
     <div class="card"><div class="card-h"><h2>Histórico de importações</h2><span class="spacer"></span>${btnXls("hist")}</div>
       <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Quando</th><th>Base</th><th>Arquivo</th><th class="num">Linhas</th></tr></thead><tbody id="tbHist"></tbody></table></div><div id="pgHist"></div></div>`;
   XLS.hist = () => ({titulo: "Histórico de importações", colunas: [["Quando", "datahora"], ["Base"], ["Arquivo"], ["Linhas", "numero"]],
-    linhas: d.historico.map(h => [h.importado_em, d.bases[h.base]?.label || h.base, h.arquivo, h.linhas])});
+    linhas: d.historico.map(h => [h.importado_em, d.bases[h.base]?.label || BASE_ROTULO[h.base] || h.base, h.arquivo, h.linhas])});
   const renderH = () => { const pg = paginar("hist", d.historico, renderH, 10);
-    $("#tbHist").innerHTML = pg.itens.map(h => `<tr><td>${fmtDH(h.importado_em)}</td><td>${esc(d.bases[h.base]?.label || h.base)}</td><td>${esc(h.arquivo)}</td><td class="num">${fmtN(h.linhas)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">Nenhuma importação.</td></tr>`;
+    $("#tbHist").innerHTML = pg.itens.map(h => `<tr><td>${fmtDH(h.importado_em)}</td><td>${esc(d.bases[h.base]?.label || BASE_ROTULO[h.base] || h.base)}</td><td>${esc(h.arquivo)}</td><td class="num">${fmtN(h.linhas)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">Nenhuma importação.</td></tr>`;
     $("#pgHist").innerHTML = pg.html; };
   resetPag("hist"); renderH();
   $$(".drop").forEach(dz => {
@@ -1161,7 +1170,7 @@ async function enviar(base, file) {
   catch (e) { if (!/em andamento/.test(e.message)) { $("#impStatus").innerHTML = `<div class="alert warn">Falha: ${esc(e.message)}</div>`; return; } }
   acompanhar();
 }
-const BASE_ROTULO = {planilha: "Planilha completa", escolas: "Cadastro de instituições", geduc: "GEDUC", censo: "Censo escolar", smtt: "SMTT", status_alunos: "Alunos por status"};
+const BASE_ROTULO = {planilha: "Planilha completa", escolas: "Cadastro de instituições", geduc: "GEDUC", censo: "Censo escolar", smtt: "SMTT", status_alunos: "Alunos por status", servidores: "Servidores (RH)"};
 const fmtSeg = s => s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
 function acompanhar() {
   clearInterval(IMP_TIMER);
@@ -1236,8 +1245,8 @@ async function usuarios() {
     <div class="table-wrap" style="max-height:none"><table id="tbU"><thead><tr><th>Usuário (e-mail)</th><th>Perfil</th><th>Instituições</th><th>Criado em</th><th></th></tr></thead>
     <tbody id="tbUBody"></tbody></table></div><div id="pgU"></div></div>`;
   const rowU = x => `<tr><td><b>${esc(fmtLogin(x.login))}</b>${x.login === SESSAO.login ? ` <span class="badge b-info">você</span>` : ""}</td>
-      <td>${x.perfil === "admin" ? `<span class="badge b-info">Administrador</span>` : `<span class="badge b-mute">Instituição</span>`}</td>
-      <td>${x.perfil === "admin" ? `<span class="muted">todas</span>` : x.escolas.map(id => `<div>${esc(nomes[id] || "#" + id)}${ESCOLAS.find(e => e.id === id)?.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</div>`).join("")}</td>
+      <td>${x.perfil === "admin" ? `<span class="badge b-info">Administrador</span>` : x.perfil === "rh" ? `<span class="badge b-ok">RH (servidores)</span>` : `<span class="badge b-mute">Instituição</span>`}</td>
+      <td>${x.perfil === "admin" ? `<span class="muted">todas</span>` : x.perfil === "rh" ? `<span class="muted">—</span>` : x.escolas.map(id => `<div>${esc(nomes[id] || "#" + id)}${ESCOLAS.find(e => e.id === id)?.bloqueado ? ` <span class="badge b-err">bloqueada</span>` : ""}</div>`).join("")}</td>
       <td>${fmtDH(x.criado_em)}</td><td class="acoes"><button class="btn-sm" data-u="${x.id}">Editar</button></td></tr>`;
   const filtrados = () => {
     const q = $("#fU").value.toLowerCase(), qd = q.replace(/\D/g, "");
@@ -1245,8 +1254,8 @@ async function usuarios() {
   };
   XLS.usuarios = () => ({titulo: "Usuários", subtitulo: $("#fU").value && `Filtro: ${$("#fU").value}`,
     colunas: [["Usuário (e-mail)"], ["Perfil"], ["Instituições"], ["Criado em", "datahora"]],
-    linhas: filtrados().map(x => [fmtLogin(x.login), x.perfil === "admin" ? "Administrador" : "Instituição",
-      x.perfil === "admin" ? "Todas" : x.escolas.map(id => nomes[id] || "#" + id).join("\n"), x.criado_em])});
+    linhas: filtrados().map(x => [fmtLogin(x.login), PERFIS[x.perfil] || x.perfil,
+      x.perfil === "admin" ? "Todas" : x.perfil === "rh" ? "" : x.escolas.map(id => nomes[id] || "#" + id).join("\n"), x.criado_em])});
   const renderU = () => {
     const pg = paginar("usuarios", filtrados(), renderU);
     $("#tbUBody").innerHTML = pg.itens.map(rowU).join("") || `<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>`;
@@ -1257,6 +1266,7 @@ async function usuarios() {
   $("#novoU").onclick = () => editarUsuario(null);
   $("#tbU").onclick = ev => { const b = ev.target.closest("[data-u]"); if (b) editarUsuario(us.find(x => x.id === +b.dataset.u)); };
 }
+const PERFIS = {admin: "Administrador", instituicao: "Instituição", rh: "RH (servidores)"};
 function editarUsuario(x) {
   const novo = !x; x = x || {login: "", perfil: "instituicao", escolas: []};
   const proprio = x.login === SESSAO.login;
@@ -1266,6 +1276,7 @@ function editarUsuario(x) {
       <div><label>${novo ? "Senha (mín. 6 caracteres)" : "Nova senha (vazio = manter a atual)"}</label><input name="senha" type="password" ${novo ? "required" : ""} minlength="6" autocomplete="new-password"></div>
       <div class="full"><label>Perfil</label><select name="perfil" ${proprio ? "disabled" : ""}>
         <option value="instituicao" ${x.perfil === "instituicao" ? "selected" : ""}>Instituição: acessa só as instituições vinculadas, sem cadastrar instituições nem gerar orçamentos</option>
+        <option value="rh" ${x.perfil === "rh" ? "selected" : ""}>RH da SEMED: só o módulo Servidores (cadastro, frequência, declarações e aniversariantes)</option>
         <option value="admin" ${x.perfil === "admin" ? "selected" : ""}>Administrador: acesso total</option></select></div>
       <div class="full" id="boxEsc"><label>Instituições vinculadas <span id="nSel" class="muted"></span></label>
         <input id="fEscU" placeholder="Filtrar instituição…" style="margin-bottom:8px">
@@ -1275,7 +1286,7 @@ function editarUsuario(x) {
     </div>
     <div class="mf">${!novo && !proprio ? `<button type="button" class="danger" id="delU">Excluir</button><span class="spacer"></span>` : ""}<button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
   const f = $("#fUsr");
-  const upd = () => { $("#boxEsc").hidden = f.perfil.value === "admin"; $("#nSel").textContent = `(${$$("[name=escolas]:checked", f).length} selecionada(s))`; };
+  const upd = () => { $("#boxEsc").hidden = f.perfil.value !== "instituicao"; $("#nSel").textContent = `(${$$("[name=escolas]:checked", f).length} selecionada(s))`; };
   f.perfil.onchange = upd; f.onchange = upd; upd();
   $("#fEscU").oninput = ev => { const q = ev.target.value.toLowerCase(); $$(".chk-list label", f).forEach(l => l.hidden = !l.dataset.n.includes(q)); };
   f.onsubmit = async ev => {
@@ -1287,6 +1298,269 @@ function editarUsuario(x) {
   };
   const del = $("#delU");
   if (del) del.onclick = async () => { if (confirm(`Excluir o usuário ${fmtLogin(x.login)}?`)) { await api(`/api/usuarios/${x.id}`, {method: "DELETE"}); closeModal(); toast("Usuário excluído"); usuarios(); } };
+}
+
+// ------------------------------------------------------------------ servidores (RH da SEMED)
+const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const SEMANA = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+let SRV = null;  // {servidores, opcoes, ultima_importacao}
+async function loadServidores() { SRV = await api("/api/servidores"); return SRV; }
+// baixa o PDF gerado pela API (GET ou POST com corpo)
+async function baixarPdf(url, body, botao) {
+  if (botao) botao.disabled = true;
+  try {
+    const r = await api(url, body ? {method: "POST", body} : {});
+    const nome = (r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1] || "documento.pdf";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await r.blob()); a.download = nome; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } finally { if (botao) botao.disabled = false; }
+}
+const opts = (lista, sel, vazio = "") => `${vazio ? `<option value="">${vazio}</option>` : ""}${lista.map(v => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
+// filtros comuns das telas do RH: busca, lotacao, quadro, turno, setor e status
+const FILTRO_SRV = [["lotacao", "Todas as lotações"], ["quadro", "Todos os quadros"], ["turno", "Todos os turnos"], ["setor", "Todos os setores"], ["status", "Todos os status"]];
+function filtrosSrv(st) {
+  return `<input data-f="q" placeholder="Nome, matrícula ou CPF…" value="${esc(st.q || "")}" style="max-width:240px">` +
+    FILTRO_SRV.map(([k, l]) => `<select data-f="${k}" style="max-width:220px">${opts(SRV.opcoes[k], st[k], l)}</select>`).join("");
+}
+function ligarFiltros(box, st, render) {
+  $$("[data-f]", box).forEach(el => el[el.tagName === "INPUT" ? "oninput" : "onchange"] = () => { st[el.dataset.f] = el.value.trim(); render(); });
+}
+function filtrar(lista, st) {
+  const q = (st.q || "").toUpperCase(), qd = q.replace(/\D/g, "");
+  return lista.filter(s => FILTRO_SRV.every(([k]) => !st[k] || s[k] === st[k]) &&
+    (!q || s.nome.includes(q) || (qd && (s.matricula.includes(qd) || s.cpf.includes(qd)))));
+}
+const filtroTxt = st => [st.q && `Busca: ${st.q}`, ...FILTRO_SRV.map(([k]) => st[k])].filter(Boolean).join(" · ");
+const pendSrv = s => [!s.lotacao && "sem lotação", !s.turno && "sem turno", !s.quadro && "sem quadro", !s.matricula && "sem matrícula", !s.dt_nasc && "sem nascimento"].filter(Boolean);
+
+const ST_SRV = {status: "ATIVO"};
+async function servidores() {
+  await loadServidores();
+  const l = SRV.servidores, ult = SRV.ultima_importacao;
+  const n = (f) => l.filter(f).length;
+  $("#view").innerHTML = `
+    ${!l.length ? `<div class="alert warn">Nenhum servidor cadastrado. Importe a exportação de funcionários do GEDUC ou a planilha <b>SGI Servidor.xlsm</b> abaixo.</div>` : ""}
+    <div class="grid kpis k4">
+      <div class="kpi hero"><div class="l">Servidores</div><div class="v">${fmtN(l.length)}</div><div class="s">${fmtN(n(s => s.status === "ATIVO"))} ativos</div></div>
+      <div class="kpi"><div class="l">Magistério</div><div class="v">${fmtN(n(s => s.quadro === "MAGISTÉRIO"))}</div></div>
+      <div class="kpi"><div class="l">Técnico/administrativo</div><div class="v">${fmtN(n(s => s.quadro === "TÉCNICO/ADMINISTRATIVO"))}</div></div>
+      <div class="kpi warn"><div class="l">Com dados a completar</div><div class="v">${fmtN(n(s => pendSrv(s).length))}</div><div class="s">lotação, turno, quadro…</div></div>
+    </div>
+    <div class="card" style="margin-bottom:16px"><div class="card-h"><h2>Importar base</h2><span class="spacer"></span>
+      ${ult ? `<span class="muted">Última: ${esc(ult.arquivo)} · ${fmtN(ult.linhas)} linhas · ${fmtDH(ult.importado_em)}</span>` : ""}</div>
+      <div class="card-b"><p class="muted" style="margin-top:0">Exportação de funcionários do GEDUC (.csv, .xls ou .xlsx) ou a planilha SGI Servidor.xlsm (aba CADASTRO).
+        O cadastro é atualizado pela matrícula: quem já existe tem os dados do GEDUC atualizados, sem perder o que o RH completou (turno, quadro, status, atuação…). Ninguém é apagado.</p>
+      <div class="drop" id="dropSrv"><svg class="i"><use href="#i-upload"/></svg>Arraste o arquivo aqui ou <label style="display:inline;color:var(--accent);cursor:pointer">escolha<input type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden></label></div>
+      <div id="impSrv"></div></div></div>
+    <div class="card"><div class="card-h" id="fSrv">${filtrosSrv(ST_SRV)}<span class="spacer"></span>${btnXls("servidores")}<button class="primary" id="novoSrv">Novo servidor</button></div>
+      <div class="table-wrap" style="max-height:none"><table id="tbS"><thead><tr><th>Servidor</th><th>Matrícula</th><th>Cargo / função</th><th>Lotação</th><th>Turno</th><th>Quadro</th><th>Status</th><th></th></tr></thead>
+      <tbody id="tbSBody"></tbody></table></div><div id="pgS"></div></div>`;
+  const dz = $("#dropSrv"), envia = async f => {
+    if (!f) return;
+    const fd = new FormData(); fd.append("arquivo", f);
+    $("#impSrv").innerHTML = `<div class="alert info" style="margin-top:12px">Importando ${esc(f.name)}…</div>`;
+    try {
+      const r = await api("/api/servidores/importar", {method: "POST", body: fd, semLogin: true});
+      toast(`Importados ${fmtN(r.lidos)}: ${fmtN(r.novos)} novo(s), ${fmtN(r.atualizados)} atualizado(s)`);
+      servidores();
+    } catch (e) { $("#impSrv").innerHTML = `<div class="alert warn" style="margin-top:12px">Falha: ${esc(e.message)}</div>`; }
+  };
+  dz.querySelector("input").onchange = ev => envia(ev.target.files[0]);
+  dz.ondragover = ev => { ev.preventDefault(); dz.classList.add("over"); };
+  dz.ondragleave = () => dz.classList.remove("over");
+  dz.ondrop = ev => { ev.preventDefault(); dz.classList.remove("over"); envia(ev.dataTransfer.files[0]); };
+  const row = s => `<tr class="click" data-id="${s.id}"><td><b>${esc(s.nome)}</b>${pendSrv(s).map(p => ` <span class="badge b-warn">${p}</span>`).join("")}<div class="muted">${esc(s.setor)}</div></td>
+      <td class="mono">${esc(s.matricula) || "—"}</td><td>${esc(s.cargo)}${s.funcao && s.funcao !== s.cargo ? `<div class="muted">${esc(s.funcao)}</div>` : ""}</td>
+      <td>${esc(s.lotacao) || "—"}</td><td>${esc(s.turno) || "—"}</td><td>${esc(s.quadro) || "—"}</td>
+      <td>${s.status === "INATIVO" ? `<span class="badge b-mute">inativo</span>` : `<span class="badge b-ok">ativo</span>`}</td>
+      <td class="acoes"><div class="row"><button class="btn-dl btn-sm" data-decl="${s.id}" title="Declaração de efetivo exercício e endereço profissional">${icDl}Declaração</button>
+        <button class="btn-dl btn-sm" data-freq="${s.id}" title="Folha de frequência do mês atual">${icDl}Frequência</button></div></td></tr>`;
+  const lista = () => filtrar(l, ST_SRV);
+  XLS.servidores = () => ({titulo: "Servidores", subtitulo: filtroTxt(ST_SRV),
+    colunas: [["Nome"], ["CPF", "cpf"], ["Sexo"], ["Nascimento", "data"], ["Matrícula"], ["Cargo"], ["Função"], ["Lotação"], ["Setor"], ["Turno"], ["Quadro"],
+      ["Regime de contratação"], ["Regime jurídico"], ["Situação funcional"], ["Carga horária"], ["Horas semanais"], ["Admissão", "data"], ["Status"],
+      ["Tipo de ensino"], ["Atuação"], ["Componente curricular"], ["Formação"], ["Habilitação"]],
+    linhas: lista().map(s => [s.nome, s.cpf, s.sexo, s.dt_nasc, s.matricula, s.cargo, s.funcao, s.lotacao, s.setor, s.turno, s.quadro,
+      s.regime_contratacao, s.regime_juridico, s.situacao_funcional, s.carga_horaria, s.horas_semanais, s.dt_admissao, s.status,
+      s.tipo_ensino, s.atuacao, s.componente, s.formacao, s.habilitacao])});
+  const render = () => {
+    const pg = paginar("servidores", lista(), render);
+    $("#tbSBody").innerHTML = pg.itens.map(row).join("") || `<tr><td colspan="8" class="empty">Nenhum servidor encontrado.</td></tr>`;
+    $("#pgS").innerHTML = pg.html;
+  };
+  ligarFiltros($("#fSrv"), ST_SRV, () => { resetPag("servidores"); render(); });
+  render();
+  $("#novoSrv").onclick = () => editarServidor(null);
+  $("#tbS").onclick = ev => {
+    const b = ev.target.closest("button");
+    if (b?.dataset.decl) return baixarPdf(`/api/servidores/${b.dataset.decl}/declaracao`, null, b);
+    if (b?.dataset.freq) { const h = new Date(); return baixarPdf("/api/servidores/frequencia", {ano: h.getFullYear(), mes: h.getMonth() + 1, ids: [+b.dataset.freq]}, b); }
+    const tr = ev.target.closest("tr[data-id]"); if (tr) editarServidor(l.find(s => s.id === +tr.dataset.id));
+  };
+}
+const CAMPOS_SRV = [
+  ["Identificação"], ["nome", "Nome do servidor", "text", "full"], ["cpf", "CPF", "cpf"], ["matricula", "Matrícula"], ["sexo", "Sexo", ["MASCULINO", "FEMININO"]],
+  ["dt_nasc", "Data de nascimento", "date"],
+  ["Lotação"], ["lotacao", "Lotação (escola / unidade)", "lista", "full"], ["setor", "Setor", "lista"], ["turno", "Turno", "turno"],
+  ["quadro", "Quadro", "quadro"], ["status", "Status", "status"],
+  ["Cargo e vínculo"], ["cargo", "Cargo", "lista"], ["funcao", "Função", "lista"], ["regime_contratacao", "Regime de contratação", "lista"],
+  ["regime_juridico", "Regime jurídico", "lista"], ["situacao_funcional", "Situação funcional", "lista"], ["carga_horaria", "Carga horária (GEDUC)"],
+  ["horas_semanais", "Horas semanais (declaração)"], ["dt_admissao", "Data de exercício (admissão)", "date"], ["orgao", "Órgão"],
+  ["Docência e formação (declaração)"], ["tipo_ensino", "Tipo de ensino", "lista"], ["atuacao", "Atuação", "lista"],
+  ["componente", "Disciplina(s) / componente(s) curricular(es)", "text", "full"], ["formacao", "Formação (graduação)"], ["habilitacao", "Habilitação (curso)"],
+];
+function editarServidor(s) {
+  const novo = !s; s = s || {status: "ATIVO", orgao: "SEMED"};
+  const campo = ([k, l, t = "text", cls = ""]) => {
+    if (!l) return `<h3 class="full" style="margin:8px 0 0">${k}</h3>`;
+    const v = s[k] || "";
+    const sel = lista => `<select name="${k}">${opts([...new Set([...lista, v].filter(Boolean))], v, "—")}</select>`;
+    const ctl = Array.isArray(t) ? sel(t) : t === "turno" || t === "quadro" || t === "status" ? sel(SRV.opcoes[t])
+      : t === "lista" ? `<input name="${k}" list="dl_${k}" value="${esc(v)}" autocomplete="off"><datalist id="dl_${k}">${(SRV.opcoes[k] || []).map(o => `<option value="${esc(o)}">`).join("")}</datalist>`
+      : `<input name="${k}" type="${t === "date" ? "date" : "text"}" value="${esc(t === "cpf" ? fmtCPF(v) : v)}">`;
+    return `<div class="${cls}"><label>${l}</label>${ctl}</div>`;
+  };
+  drawer(`<div class="dh"><div style="flex:1"><h2>${novo ? "Novo servidor" : esc(s.nome)}</h2>
+      <div class="muted">${novo ? "Cadastro feito pelo RH" : `Matrícula ${esc(s.matricula) || "—"} · atualizado em ${fmtDH(s.atualizado_em)}`}</div>
+      ${novo ? "" : `<div style="margin-top:6px">${pendSrv(s).map(p => `<span class="badge b-warn">${p}</span>`).join("")}</div>`}</div>
+      <button onclick="closeDrawer()">Fechar</button></div>
+    <div class="db">
+      ${novo ? "" : `<div class="row" style="margin-bottom:12px"><button class="btn-dl" id="sDecl">${icDl}Declaração</button>
+        <select id="sMes" style="width:auto">${MESES.map((m, i) => `<option value="${i + 1}" ${i === new Date().getMonth() ? "selected" : ""}>${m}</option>`).join("")}</select>
+        <input id="sAno" type="number" value="${new Date().getFullYear()}" style="width:90px"><button class="btn-dl" id="sFreq">${icDl}Folha de frequência</button></div>`}
+      <form id="fSrvEd" class="form">${CAMPOS_SRV.map(campo).join("")}
+        <div class="full row"><button class="primary">Salvar</button>${novo ? "" : `<span class="spacer"></span><button type="button" class="danger" id="sExc">Excluir</button>`}</div></form></div>`);
+  const f = $("#fSrvEd");
+  f.nome.required = true;
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    const body = Object.fromEntries(new FormData(f));
+    if (novo) await api("/api/servidores", {method: "POST", body}); else await api(`/api/servidores/${s.id}`, {method: "PUT", body});
+    toast("Servidor salvo"); closeDrawer(); servidores();
+  };
+  if (novo) return;
+  $("#sDecl").onclick = ev => baixarPdf(`/api/servidores/${s.id}/declaracao`, null, ev.currentTarget);
+  $("#sFreq").onclick = ev => baixarPdf("/api/servidores/frequencia", {ano: +$("#sAno").value, mes: +$("#sMes").value, ids: [s.id]}, ev.currentTarget);
+  $("#sExc").onclick = async () => {
+    if (!confirm(`Excluir ${s.nome} do cadastro de servidores?`)) return;
+    await api(`/api/servidores/${s.id}`, {method: "DELETE"}); toast("Servidor excluído"); closeDrawer(); servidores();
+  };
+}
+
+const ST_FREQ = {status: "ATIVO", mes: new Date().getMonth() + 1, ano: new Date().getFullYear()};
+async function frequencia() {
+  await loadServidores();
+  const st = ST_FREQ;
+  $("#view").innerHTML = `
+    <div class="card" style="margin-bottom:16px"><div class="card-b row">
+      <div><label>Mês</label><select id="fMes">${MESES.map((m, i) => `<option value="${i + 1}" ${i + 1 === st.mes ? "selected" : ""}>${m}</option>`).join("")}</select></div>
+      <div><label>Ano</label><input id="fAno" type="number" value="${st.ano}" style="width:100px"></div>
+      <div id="ferMes" style="flex:1;min-width:260px"></div></div></div>
+    <div class="card"><div class="card-h" id="fFreq">${filtrosSrv(st)}</div>
+      <div class="card-h"><span class="muted" id="selFreq"></span><span class="spacer"></span><button class="primary" id="gerarFreq">Gerar folhas em PDF</button></div>
+      <div class="table-wrap"><table><thead><tr><th><input type="checkbox" id="chkFreq" style="width:auto" checked title="Marcar/desmarcar todos do filtro"></th><th>Servidor</th><th>Matrícula</th><th>Cargo</th><th>Lotação</th><th>Turno</th></tr></thead>
+      <tbody id="tbF"></tbody></table></div><div id="pgF"></div></div>`;
+  const fora = new Set();  // desmarcados (por padrao todos do filtro vao no PDF)
+  const lista = () => filtrar(SRV.servidores, st), marcados = () => lista().filter(s => !fora.has(s.id));
+  const render = () => {
+    const pg = paginar("freq", lista(), render, 50);
+    $("#tbF").innerHTML = pg.itens.map(s => `<tr><td><input type="checkbox" value="${s.id}" ${fora.has(s.id) ? "" : "checked"} style="width:auto"></td>
+      <td><b>${esc(s.nome)}</b>${!s.turno ? ` <span class="badge b-warn">sem turno</span>` : ""}</td><td class="mono">${esc(s.matricula)}</td><td>${esc(s.cargo)}</td><td>${esc(s.lotacao)}</td><td>${esc(s.turno)}</td></tr>`).join("")
+      || `<tr><td colspan="6" class="empty">Nenhum servidor no filtro.</td></tr>`;
+    $("#pgF").innerHTML = pg.html;
+    $("#selFreq").textContent = `${fmtN(marcados().length)} folha(s) de ${MESES[st.mes - 1].toLowerCase()} de ${st.ano}: uma página por servidor, em ordem de lotação e nome`;
+  };
+  const feriadosMes = async () => {
+    const ano = await api(`/api/feriados?ano=${st.ano}`), fs = ano.filter(f => +f.data.slice(5, 7) === st.mes);
+    $("#ferMes").innerHTML = !ano.length ? `<div class="alert warn" style="margin:0">Nenhum feriado cadastrado em ${st.ano}. <a href="#/feriados?ano=${st.ano}">Cadastre os feriados</a> para marcá-los na folha.</div>`
+      : `<label>Feriados e pontos facultativos do mês</label><div>${fs.map(f => `<span class="badge b-err">${fmtData(f.data).slice(0, 5)} · ${esc(f.descricao)}</span>`).join(" ") || `<span class="muted">nenhum</span>`}
+        <a class="btn-sm btn" href="#/feriados?ano=${st.ano}" style="margin-left:6px">Editar feriados</a></div>`;
+  };
+  ligarFiltros($("#fFreq"), st, () => { resetPag("freq"); render(); });
+  $("#fMes").onchange = ev => { st.mes = +ev.target.value; render(); feriadosMes(); };
+  $("#fAno").onchange = ev => { st.ano = +ev.target.value; render(); feriadosMes(); };
+  $("#tbF").onchange = ev => { const id = +ev.target.value; ev.target.checked ? fora.delete(id) : fora.add(id); render(); };
+  $("#chkFreq").onchange = ev => { lista().forEach(s => ev.target.checked ? fora.delete(s.id) : fora.add(s.id)); render(); };
+  $("#gerarFreq").onclick = ev => {
+    const ids = marcados().map(s => s.id);
+    if (!ids.length) return toast("Nenhum servidor selecionado");
+    baixarPdf("/api/servidores/frequencia", {ano: st.ano, mes: st.mes, ids}, ev.currentTarget);
+  };
+  render(); feriadosMes();
+}
+
+const ST_ANIV = {status: "ATIVO", mes: new Date().getMonth() + 1};
+async function aniversariantes() {
+  await loadServidores();
+  const st = ST_ANIV, hoje = new Date();
+  $("#view").innerHTML = `<div class="card"><div class="card-h" id="fAniv">
+      <select id="aMes" style="max-width:160px">${MESES.map((m, i) => `<option value="${i + 1}" ${i + 1 === st.mes ? "selected" : ""}>${m}</option>`).join("")}</select>
+      ${filtrosSrv(st)}</div>
+    <div class="card-h"><span class="muted" id="nAniv"></span><span class="spacer"></span>
+      <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="13" value="0" style="width:64px"> etiqueta(s)</label>
+      <label class="row" style="margin:0;gap:6px"><input type="checkbox" id="aGuias" style="width:auto">contorno (papel comum)</label>
+      ${btnXls("aniv")}<button class="primary" id="aEtq">${icDl}Etiquetas em PDF</button></div>
+    <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Dia</th><th>Servidor</th><th>Na etiqueta</th><th>Cargo / função</th><th>Lotação</th><th class="num">Idade</th></tr></thead>
+    <tbody id="tbA"></tbody></table></div>
+    <div class="card-b muted">Etiquetas A4 com 14 por folha (99 × 38,1 mm, como a Pimaco A4363/6182), na ordem do dia do aniversário.</div></div>`;
+  const abrev = n => { const out = []; for (const p of n.split(/\s+/)) { out.push(p); if (out.filter(x => !["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x)).length === 2) break; }
+    return out.map(x => ["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x) ? x.toLowerCase() : x[0] + x.slice(1).toLowerCase()).join(" "); };
+  const idade = d => hoje.getFullYear() - +d.slice(0, 4);
+  const lista = () => filtrar(SRV.servidores, st).filter(s => +s.dt_nasc.slice(5, 7) === st.mes).sort((a, b) => a.dt_nasc.slice(8, 10).localeCompare(b.dt_nasc.slice(8, 10)) || a.nome.localeCompare(b.nome));
+  XLS.aniv = () => ({titulo: `Aniversariantes de ${MESES[st.mes - 1]}`, subtitulo: filtroTxt(st),
+    colunas: [["Dia", "numero"], ["Servidor"], ["Na etiqueta"], ["Cargo"], ["Função"], ["Lotação"], ["Nascimento", "data"], ["Idade que completa", "numero"]],
+    linhas: lista().map(s => [+s.dt_nasc.slice(8, 10), s.nome, abrev(s.nome), s.cargo, s.funcao, s.lotacao, s.dt_nasc, idade(s.dt_nasc)])});
+  const render = () => {
+    const l = lista();
+    $("#nAniv").textContent = `${fmtN(l.length)} aniversariante(s) em ${MESES[st.mes - 1].toLowerCase()}`;
+    $("#tbA").innerHTML = l.map(s => `<tr><td><b>${s.dt_nasc.slice(8, 10)}/${s.dt_nasc.slice(5, 7)}</b></td><td>${esc(s.nome)}</td><td>${esc(abrev(s.nome))}</td>
+      <td>${esc(s.funcao || s.cargo)}</td><td>${esc(s.lotacao)}</td><td class="num">${idade(s.dt_nasc)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Nenhum aniversariante no filtro.</td></tr>`;
+  };
+  const semData = SRV.servidores.filter(s => !s.dt_nasc).length;
+  if (semData) $("#nAniv").title = `${semData} servidor(es) sem data de nascimento não aparecem aqui`;
+  ligarFiltros($("#fAniv"), st, render);
+  $("#aMes").onchange = ev => { st.mes = +ev.target.value; render(); };
+  $("#aEtq").onclick = ev => {
+    const ids = lista().map(s => s.id);
+    if (!ids.length) return toast("Nenhum aniversariante no filtro");
+    baixarPdf("/api/servidores/etiquetas", {ids, pular: +$("#aPular").value || 0, guias: $("#aGuias").checked}, ev.currentTarget);
+  };
+  render();
+}
+
+async function feriados(_, qs) {
+  const ano = +(qs.get("ano") || new Date().getFullYear());
+  const fs = await api(`/api/feriados?ano=${ano}`);
+  $("#view").innerHTML = `<div class="card"><div class="card-h">
+      <label class="row" style="margin:0;gap:6px">Ano <input id="fdAno" type="number" value="${ano}" style="width:100px"></label>
+      <span class="muted">${fmtN(fs.length)} data(s)</span><span class="spacer"></span>
+      <button id="fdPadrao" title="Inclui os feriados nacionais, do Maranhão e de São Luís (as datas já cadastradas não mudam)">Incluir feriados padrão de ${ano}</button>${btnXls("feriados")}</div>
+    <form class="card-h" id="fdNovo" style="flex-wrap:wrap">
+      <input name="data" type="date" required style="width:170px" min="${ano}-01-01" max="${ano}-12-31">
+      <input name="tipo" value="Feriado" list="dlTipo" style="width:180px" title="Sai na coluna Rubrica da entrada"><datalist id="dlTipo"><option>Feriado</option><option>Ponto facultativo</option><option>Recesso</option></datalist>
+      <input name="descricao" placeholder="Descrição (ex.: Natal)" required style="flex:1;min-width:220px" maxlength="60">
+      <button class="primary">Adicionar</button></form>
+    <div class="table-wrap" style="max-height:none"><table id="tbFd"><thead><tr><th>Data</th><th>Dia da semana</th><th>Tipo (rubrica da entrada)</th><th>Descrição (rubrica da saída)</th><th></th></tr></thead><tbody>
+      ${fs.map(f => `<tr><td>${fmtData(f.data)}</td><td>${SEMANA[new Date(f.data + "T12:00").getDay()]}</td><td>${esc(f.tipo)}</td><td>${esc(f.descricao)}</td>
+        <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${f.data}">Editar</button><button class="btn-sm danger" data-del="${f.data}">Excluir</button></div></td></tr>`).join("")
+        || `<tr><td colspan="5" class="empty">Nenhum feriado cadastrado em ${ano}. Clique em “Incluir feriados padrão de ${ano}”.</td></tr>`}</tbody></table></div>
+    <div class="card-b muted">Sábados e domingos já saem marcados na folha. Confira os pontos facultativos de cada ano pelo decreto da Prefeitura.</div></div>`;
+  XLS.feriados = () => ({titulo: `Feriados ${ano}`, colunas: [["Data", "data"], ["Dia da semana"], ["Tipo"], ["Descrição"]],
+    linhas: fs.map(f => [f.data, SEMANA[new Date(f.data + "T12:00").getDay()], f.tipo, f.descricao])});
+  $("#fdAno").onchange = ev => location.hash = `#/feriados?ano=${ev.target.value}`;
+  $("#fdPadrao").onclick = async () => { const r = await api("/api/feriados/padrao", {method: "POST", body: {ano}}); toast(`${r.incluidos} data(s) incluída(s)`); feriados(_, qs); };
+  $("#fdNovo").onsubmit = async ev => {
+    ev.preventDefault();
+    const f = Object.fromEntries(new FormData(ev.target));
+    await api(`/api/feriados/${f.data}`, {method: "PUT", body: {tipo: f.tipo, descricao: f.descricao}}); toast("Feriado salvo"); feriados(_, qs);
+  };
+  $("#tbFd").onclick = async ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    if (b.dataset.del) { if (!confirm(`Excluir ${fmtData(b.dataset.del)}?`)) return; await api(`/api/feriados/${b.dataset.del}`, {method: "DELETE"}); return feriados(_, qs); }
+    const f = fs.find(x => x.data === b.dataset.ed), form = $("#fdNovo");
+    form.data.value = f.data; form.tipo.value = f.tipo; form.descricao.value = f.descricao; form.descricao.focus();
+  };
 }
 
 async function boot() {

@@ -147,6 +147,28 @@ CREATE TABLE IF NOT EXISTS arquivos_config (
     chave TEXT PRIMARY KEY, tipo TEXT, conteudo BLOB NOT NULL
 );
 
+-- Modulo Servidores (RH da SEMED): cadastro vindo do GEDUC de funcionarios + campos completados pelo RH
+CREATE TABLE IF NOT EXISTS servidores (
+    id INTEGER PRIMARY KEY,
+    nome TEXT NOT NULL, cpf TEXT DEFAULT '', sexo TEXT DEFAULT '', dt_nasc TEXT DEFAULT '', matricula TEXT DEFAULT '',
+    cargo TEXT DEFAULT '', funcao TEXT DEFAULT '', lotacao TEXT DEFAULT '', zona TEXT DEFAULT '', setor TEXT DEFAULT '',
+    carga_horaria TEXT DEFAULT '', situacao_funcional TEXT DEFAULT '', regime_contratacao TEXT DEFAULT '',
+    turno TEXT DEFAULT '', horas_semanais TEXT DEFAULT '', dt_admissao TEXT DEFAULT '', quadro TEXT DEFAULT '',
+    regime_juridico TEXT DEFAULT '', formacao TEXT DEFAULT '', habilitacao TEXT DEFAULT '', status TEXT DEFAULT 'ATIVO',
+    orgao TEXT DEFAULT 'SEMED', tipo_ensino TEXT DEFAULT '', atuacao TEXT DEFAULT '', componente TEXT DEFAULT '',
+    nome_norm TEXT DEFAULT '',
+    atualizado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_servidores_matricula ON servidores(matricula);
+CREATE INDEX IF NOT EXISTS ix_servidores_nome ON servidores(nome_norm);
+
+-- Feriados e pontos facultativos marcados na folha de frequencia
+CREATE TABLE IF NOT EXISTS feriados (
+    data TEXT PRIMARY KEY,            -- AAAA-MM-DD
+    tipo TEXT NOT NULL DEFAULT 'Feriado',
+    descricao TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS importacoes (
     id INTEGER PRIMARY KEY, base TEXT, arquivo TEXT, linhas INTEGER,
     importado_em TEXT DEFAULT (datetime('now','localtime'))

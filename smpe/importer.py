@@ -47,11 +47,19 @@ BASES = {
         "certidao": ["CERTIDAO_NASCIMENTO", "CERTIDAO"], "cpf": ["CPF_ALUNO", "CPF"],
         "telefone": ["TELEFONE", "TELEFONE_ALUNO", "CELULAR", "FONE"]}),
 }
-DATE_COLS = {"dt_nasc", "nascido", "data_exp", "nascimento"}
+DATE_COLS = {"dt_nasc", "nascido", "data_exp", "nascimento", "dt_admissao"}
 CPF_COLS = {"cpf"}
 NOME_COL = {"geduc": "aluno", "censo": "aluno", "smtt": "estudante", "status_alunos": "aluno"}
 LABELS = {"escolas": "Cadastro de instituições", "geduc": "GEDUC", "censo": "Censo escolar", "smtt": "SMTT",
           "status_alunos": "Alunos por status"}
+
+
+# bases lidas por outros modulos com o mesmo leitor, mas gravadas por eles (ex.: servidores.py)
+OUTRAS: dict[str, tuple] = {}
+
+
+def _def(base: str) -> tuple:
+    return BASES.get(base) or OUTRAS[base]
 
 
 def _h(v) -> str:
@@ -60,10 +68,11 @@ def _h(v) -> str:
 
 
 def _obrigatorias(base: str) -> set[str]:
-    o = BASES[base][1]
+    o = _def(base)[1]
     return {_h(x) for x in ([o] if isinstance(o, str) else o)}
 
 
+FIM_DOS_DADOS = 5000  # linhas seguidas sem nome: acabaram os registros
 LINHAS_CABECALHO = 50  # exportacoes do GEDUC trazem titulo, filtros e totais antes do cabecalho
 
 
@@ -101,7 +110,7 @@ def _clean(base: str, col: str, v):
 
 
 def _rows_to_records(base: str, rows_iter) -> list[dict]:
-    cols = BASES[base][2]
+    cols = _def(base)[2]
     rows_iter = iter(rows_iter)
     head = []
     for r in rows_iter:
@@ -122,10 +131,14 @@ def _rows_to_records(base: str, rows_iter) -> list[dict]:
         x = conv(r)
         if x:
             recs.append(x)
+    vazias = 0
     for r in rows_iter:
         x = conv(r)
         if x:
             recs.append(x)
+            vazias = 0
+        elif (vazias := vazias + 1) >= FIM_DOS_DADOS:  # formula arrastada ate o fim da planilha (1 milhao de linhas)
+            break
     if not recs:  # evita apagar a base atual com um arquivo vazio ou errado
         raise ValueError(f"Nenhum registro encontrado abaixo do cabeçalho (linha {hi + 1})")
     return recs
@@ -257,7 +270,7 @@ def _sheets(filename: str, data: bytes) -> list[tuple[str, list]]:
 
 def read_file(base: str, filename: str, data: bytes, sheet: str | None = None) -> list[dict]:
     """Base de um arquivo avulso: a aba com o nome padrao, se houver, ou a primeira aba que tenha o cabecalho."""
-    alvo = _h(sheet or BASES[base][0])
+    alvo = _h(sheet or _def(base)[0])
     wb = None
     if data[:2] == b"PK":  # xlsx / xlsm: aba a aba, sem carregar o arquivo todo na memoria
         wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)

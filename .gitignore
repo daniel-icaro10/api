@@ -12,3 +12,7 @@ data/
 migracao/
 modelo*.pdf
 deploy/smpe.env
+# arquivos de trabalho na raiz (remessas, relatorios e PDFs com dados pessoais)
+/*.pdf
+/*.txt
+/*.zip

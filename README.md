@@ -16,6 +16,7 @@ Versão web da planilha **SIS SMPE 2026.4.xlsm**. O sistema faz a migração de 
 |---|---|
 | Administrador | Tudo: cadastrar instituições e usuários, bloquear e desbloquear, gerar orçamentos, importar bases e mudar as configurações (logo, suporte, WhatsApp, preço) |
 | Instituição | Vê só os alunos das instituições vinculadas ao usuário: Painel, Matriculado (correções e cadastro individual), Remessas, arquivo do processamento final, Criticar remessa e Relatórios. Não cadastra instituições nem gera orçamentos |
+| RH (SEMED) | Só o módulo **Servidores (RH)**: cadastro dos servidores, folha de frequência, declaração, aniversariantes e feriados. Não vê alunos, instituições nem remessas. O administrador também acessa o módulo |
 
 - O administrador cadastra os usuários em **Usuários** e vincula cada um a uma ou mais instituições.
 - O nome da instituição ativa aparece no canto superior direito. Quem tem mais de uma instituição troca a ativa pelo menu desse canto, que também tem alterar senha e sair.
@@ -43,6 +44,19 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 | AlunoCriticaUtf8.exe (validador oficial SMPE) | Criticar remessa: mesmas críticas de 0 a 17 e regras A a C, com relatório `CRITICA_*.txt`, mais a crítica 18 (mãe com nome e sobrenome) |
 | ORÇAMENTO | Orçamento (só administrador): matriculados com CPF × valor unitário por aluno + peticionamento − desconto |
 | GEDUC, CENSO, SMTT, ALUNOS_POR_STATUS | Bases e importação |
+
+## Módulo Servidores (RH) — planilha SGI Servidor.xlsm
+
+| Planilha SGI Servidor | Sistema |
+|---|---|
+| GEDUC (exportação de funcionários) e CADASTRO | **Servidores → Importar base**: aceita o CSV/XLS/XLSX de funcionários do GEDUC ou a própria `SGI Servidor.xlsm` (aba CADASTRO). O cadastro é atualizado pela **matrícula** (sem matrícula, pelo CPF ou nome): os dados do GEDUC são atualizados, o que o RH completou (turno, quadro, status, atuação…) é mantido e ninguém é apagado |
+| Formulário de cadastro (UserForm2) | **Servidores → Novo servidor / clicar no servidor**: identificação, lotação, cargo e vínculo, docência e formação. Valida CPF e não deixa repetir matrícula |
+| FREQUENCIA / FREQUENCIALOTE | **Folha de frequência**: escolhe mês/ano e filtra por lotação, quadro, turno, setor e status; gera um PDF com uma página por servidor, no layout do Registro Individual de Frequência da SEMED (sábados, domingos, feriados e pontos facultativos em vermelho). Também sai individual pelo cadastro do servidor |
+| DECLARACAO | **Declaração** (botão no servidor): Declaração de Efetivo Exercício e Endereço Profissional no layout da aba DECLARACAO (logo São Luís/SEMED no cabeçalho e faixa da cidade no rodapé, extraídas da planilha). O endereço profissional, o e-mail e o INEP vêm da instituição cadastrada com o mesmo nome da lotação; tipo de ensino, atuação e componente curricular saem para os docentes |
+| ANIVERSARIANTES / IMPRESSAO_ETIQUETA | **Aniversariantes**: lista do mês com os mesmos filtros e etiquetas em PDF (A4, 14 por folha, 99 × 38,1 mm — Pimaco A4363/6182), com opção de pular etiquetas já usadas |
+| DADOS (calendário com feriados) | **Feriados**: cadastro por ano; o botão “Incluir feriados padrão” traz os nacionais, do Maranhão e de São Luís. Os pontos facultativos de cada ano seguem o decreto da Prefeitura |
+
+Correções em relação à planilha: a busca no GEDUC deixa de ser pelo nome (havia 11 nomes repetidos), o CPF mantém os zeros à esquerda, as grafias "MATTUTINO", "TERCEIRAZADO" e "Títular" são padronizadas, e a fórmula arrastada até a linha 1.048.576 do CADASTRO é ignorada na importação.
 
 ## Regra do CPF consolidado (mesma fórmula da coluna AO)
 

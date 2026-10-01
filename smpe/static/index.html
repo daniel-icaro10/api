@@ -24,6 +24,10 @@
   <symbol id="i-suporte" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
   <symbol id="i-whatsapp" viewBox="0 0 24 24"><path d="M3 21l1.7-4.9A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-2-1-1 1a4 4 0 0 1-2-2l1-1-1-2z"/></symbol>
   <symbol id="i-usuarios" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1"/><path d="M16 4a4 4 0 0 1 0 8"/><path d="M22 21v-1a6 6 0 0 0-4-5.6"/></symbol>
+  <symbol id="i-servidores" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M5.5 17a3.5 3.5 0 0 1 7 0"/><path d="M15 10h3"/><path d="M15 14h3"/></symbol>
+  <symbol id="i-frequencia" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></symbol>
+  <symbol id="i-bolo" viewBox="0 0 24 24"><path d="M4 21h16"/><path d="M5 21v-7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v7"/><path d="M5 16c2 1.5 4.5 1.5 7 0s5-1.5 7 0"/><path d="M12 12V8"/><path d="M12 5.5c.8-.8.8-1.7 0-2.5-.8.8-.8 1.7 0 2.5z"/></symbol>
+  <symbol id="i-calendario" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M8 14h2"/><path d="M14 14h2"/><path d="M8 17h2"/></symbol>
   <symbol id="i-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
@@ -44,14 +48,19 @@
 <aside class="side">
   <div class="brand"><img class="logo-img" src="/api/logo" alt="SIS SMPE - Migração de estudantes SMTT"></div>
   <nav id="nav">
-    <div class="nav-label">Visão geral</div>
-    <a href="#/painel" data-r="painel"><svg class="i"><use href="#i-painel"/></svg>Painel</a>
-    <div class="nav-label">Operação</div>
-    <a href="#/migracao" data-r="migracao"><svg class="i"><use href="#i-migracao"/></svg>Matriculado</a>
-    <a href="#/remessas" data-r="remessas"><svg class="i"><use href="#i-remessas"/></svg>Remessas SMTT</a>
-    <a href="#/critica" data-r="critica"><svg class="i"><use href="#i-critica"/></svg>Criticar remessa</a>
-    <a href="#/relatorios" data-r="relatorios"><svg class="i"><use href="#i-relatorios"/></svg>Relatórios</a>
+    <div class="nav-label" data-smpe>Visão geral</div>
+    <a href="#/painel" data-r="painel" data-smpe><svg class="i"><use href="#i-painel"/></svg>Painel</a>
+    <div class="nav-label" data-smpe>Operação</div>
+    <a href="#/migracao" data-r="migracao" data-smpe><svg class="i"><use href="#i-migracao"/></svg>Matriculado</a>
+    <a href="#/remessas" data-r="remessas" data-smpe><svg class="i"><use href="#i-remessas"/></svg>Remessas SMTT</a>
+    <a href="#/critica" data-r="critica" data-smpe><svg class="i"><use href="#i-critica"/></svg>Criticar remessa</a>
+    <a href="#/relatorios" data-r="relatorios" data-smpe><svg class="i"><use href="#i-relatorios"/></svg>Relatórios</a>
     <a href="#/orcamento" data-r="orcamento" data-admin><svg class="i"><use href="#i-orcamento"/></svg>Orçamento</a>
+    <div class="nav-label" data-rh>Servidores (RH)</div>
+    <a href="#/servidores" data-r="servidores" data-rh><svg class="i"><use href="#i-servidores"/></svg>Servidores</a>
+    <a href="#/frequencia" data-r="frequencia" data-rh><svg class="i"><use href="#i-frequencia"/></svg>Folha de frequência</a>
+    <a href="#/aniversariantes" data-r="aniversariantes" data-rh><svg class="i"><use href="#i-bolo"/></svg>Aniversariantes</a>
+    <a href="#/feriados" data-r="feriados" data-rh><svg class="i"><use href="#i-calendario"/></svg>Feriados</a>
     <div class="nav-label" data-admin>Cadastros</div>
     <a href="#/escolas" data-r="escolas" data-admin><svg class="i"><use href="#i-escolas"/></svg>Instituições</a>
     <a href="#/usuarios" data-r="usuarios" data-admin><svg class="i"><use href="#i-usuarios"/></svg>Usuários</a>
@@ -69,7 +78,7 @@
   <header class="top">
     <button class="icon-btn only-mobile" id="menuBtn" aria-label="Menu">☰</button>
     <div><h1 id="title">Painel</h1><div class="crumb" id="crumb">SIS SMPE</div></div>
-    <form class="search" id="buscaForm"><svg class="i"><use href="#i-busca"/></svg><input id="buscaInput" placeholder="Localizar estudante por nome ou CPF…" autocomplete="off"></form>
+    <form class="search" id="buscaForm" data-smpe><svg class="i"><use href="#i-busca"/></svg><input id="buscaInput" placeholder="Localizar estudante por nome ou CPF…" autocomplete="off"></form>
     <div class="user" id="userBox">
       <button class="user-btn" id="userBtn" aria-haspopup="true"><span class="user-av" id="userAv"></span>
         <span class="user-txt"><b id="userNome"></b><small id="userPerfil"></small></span></button>

@@ -11,7 +11,7 @@ import threading
 import time
 import traceback
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -19,8 +19,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import critica, db, exportar, fichas, importer, logic, pdf
-from .util import chave_nome, cpf_valido, norm_cpf, norm_nome, so_digitos
+from . import critica, db, exportar, fichas, importer, logic, pdf, servidores, servidores_pdf
+from .util import chave_nome, cpf_valido, norm_cpf, norm_nome, sem_acento, so_digitos
 
 @asynccontextmanager
 async def _ciclo(_app):
@@ -163,9 +163,21 @@ def usuario(request: Request) -> dict:
     if not r or r["expira"] < time.time():
         raise HTTPException(401, "Sessão expirada, faça login novamente")
     u = {**dict(r), "token": token}
-    if u["perfil"] == "admin":
+    if u["perfil"] == "rh" and not request.url.path.startswith(ROTAS_RH):
+        raise HTTPException(403, "O perfil RH acessa só o módulo Servidores")
+    if u["perfil"] in ("admin", "rh"):
         return {**u, "escola_id": None, "escola_nome": "", "escolas": []}
     return {**u, **_escopo(_instituicoes(con, u["id"]), u["ativa"])}
+
+
+# perfil RH (SEMED/Recursos Humanos): so o modulo Servidores
+ROTAS_RH = ("/api/servidores", "/api/feriados", "/api/sessao", "/api/senha", "/api/logout", "/api/exportar")
+
+
+def rh(u: dict = Depends(usuario)) -> dict:
+    if u["perfil"] not in ("admin", "rh"):
+        raise HTTPException(403, "Somente o RH da SEMED ou o administrador pode fazer isso")
+    return u
 
 
 def admin(u: dict = Depends(usuario)) -> dict:
@@ -245,7 +257,7 @@ def login(d: LoginIn, request: Request, response: Response):
     r = con.execute("SELECT * FROM usuarios WHERE login=?", (_norm_login(d.login),)).fetchone()
     if not r or not _confere(d.senha, r["senha_hash"]):
         raise HTTPException(401, "Login ou senha inválidos")
-    esc = {} if r["perfil"] == "admin" else _escopo(_instituicoes(con, r["id"]), None)
+    esc = {} if r["perfil"] in ("admin", "rh") else _escopo(_instituicoes(con, r["id"]), None)
     _abre_sessao(con, request, response, r["id"], esc.get("escola_id"))
     return _sessao_json({**dict(r), **esc})
 
@@ -303,7 +315,7 @@ def _valida_usuario(con, d: UsuarioIn, uid: int | None) -> str:
     atual = con.execute("SELECT login FROM usuarios WHERE id=?", (uid,)).fetchone() if uid else None
     if not (atual and atual["login"] == login) and not _email_ok(login):  # logins antigos continuam valendo
         raise HTTPException(400, "O usuário deve ser um e-mail válido")
-    if d.perfil not in ("admin", "instituicao"):
+    if d.perfil not in ("admin", "instituicao", "rh"):
         raise HTTPException(400, "Perfil inválido")
     outro = con.execute("SELECT id FROM usuarios WHERE login=?", (login,)).fetchone()
     if outro and outro["id"] != uid:
@@ -1366,3 +1378,250 @@ async def importar(base: str = Form(...), arquivo: UploadFile = File(...), u: di
     _import_thread = threading.Thread(target=job, daemon=True)
     _import_thread.start()
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ servidores (RH da SEMED)
+
+class ServidorIn(BaseModel):
+    nome: str
+    cpf: str | None = ""
+    sexo: str | None = ""
+    dt_nasc: str | None = ""
+    matricula: str | None = ""
+    cargo: str | None = ""
+    funcao: str | None = ""
+    lotacao: str | None = ""
+    zona: str | None = ""
+    setor: str | None = ""
+    carga_horaria: str | None = ""
+    situacao_funcional: str | None = ""
+    regime_contratacao: str | None = ""
+    turno: str | None = ""
+    horas_semanais: str | None = ""
+    dt_admissao: str | None = ""
+    quadro: str | None = ""
+    regime_juridico: str | None = ""
+    formacao: str | None = ""
+    habilitacao: str | None = ""
+    status: str | None = "ATIVO"
+    orgao: str | None = "SEMED"
+    tipo_ensino: str | None = ""
+    atuacao: str | None = ""
+    componente: str | None = ""
+
+
+def _servidor_vals(con, d: ServidorIn, sid: int | None) -> dict:
+    v = _limpo(d)
+    for k in ("dt_nasc", "dt_admissao"):
+        v[k] = _data_iso(v[k], "Data de nascimento" if k == "dt_nasc" else "Data de admissão")
+    v = {k: servidores.normaliza(k, x) for k, x in v.items()}
+    if not v["nome"]:
+        raise HTTPException(400, "Informe o nome do servidor")
+    if v["cpf"] and not cpf_valido(v["cpf"]):
+        raise HTTPException(400, "CPF inválido")
+    v["status"] = v["status"] or "ATIVO"
+    if v["matricula"]:
+        outro = con.execute("SELECT id, nome FROM servidores WHERE matricula=?", (v["matricula"],)).fetchone()
+        if outro and outro["id"] != sid:
+            raise HTTPException(400, f"A matrícula {v['matricula']} já é de {outro['nome']}")
+    return v
+
+
+def _servidor(con, sid: int) -> dict:
+    r = con.execute("SELECT * FROM servidores WHERE id=?", (sid,)).fetchone()
+    if not r:
+        raise HTTPException(404, "Servidor não encontrado")
+    return dict(r)
+
+
+@app.get("/api/servidores")
+def listar_servidores(u: dict = Depends(rh)):
+    con = db.connect()
+    lista = [{k: r[k] if k == "id" else r[k] or "" for k in ("id", *servidores.CAMPOS, "atualizado_em")}
+             for r in con.execute("SELECT * FROM servidores ORDER BY nome_norm, matricula")]
+
+    def distintos(c, base=()):
+        return sorted({*base, *(s[c] for s in lista if s[c])})
+
+    ult = con.execute("SELECT arquivo, linhas, importado_em FROM importacoes WHERE base='servidores' "
+                      "ORDER BY id DESC LIMIT 1").fetchone()
+    opcoes = {c: distintos(c) for c in ("lotacao", "setor", "cargo", "funcao", "regime_contratacao", "regime_juridico",
+                                         "situacao_funcional")}
+    opcoes.update(quadro=distintos("quadro", servidores.QUADROS), turno=distintos("turno", servidores.TURNOS),
+                  status=servidores.STATUS, tipo_ensino=distintos("tipo_ensino", servidores.TIPOS_ENSINO),
+                  atuacao=distintos("atuacao", servidores.ATUACOES))
+    return {"servidores": lista, "ultima_importacao": dict(ult) if ult else None, "opcoes": opcoes}
+
+
+@app.post("/api/servidores")
+def criar_servidor(d: ServidorIn, u: dict = Depends(rh)):
+    con = db.connect()
+    v = _servidor_vals(con, d, None)
+    with con:
+        sid = con.execute(f"INSERT INTO servidores ({', '.join(v)}, nome_norm) VALUES ({', '.join('?' * (len(v) + 1))}) "
+                          "RETURNING id", (*v.values(), norm_nome(v["nome"]))).fetchone()[0]
+    return {"id": sid}
+
+
+@app.put("/api/servidores/{sid}")
+def editar_servidor(sid: int, d: ServidorIn, u: dict = Depends(rh)):
+    con = db.connect()
+    _servidor(con, sid)
+    v = _servidor_vals(con, d, sid)
+    with con:
+        con.execute(f"UPDATE servidores SET {', '.join(f'{k}=?' for k in v)}, nome_norm=?, "
+                    f"atualizado_em={servidores._agora()} WHERE id=?", (*v.values(), norm_nome(v["nome"]), sid))
+    return {"ok": True}
+
+
+@app.delete("/api/servidores/{sid}")
+def excluir_servidor(sid: int, u: dict = Depends(rh)):
+    con = db.connect()
+    with con:
+        con.execute("DELETE FROM servidores WHERE id=?", (sid,))
+    return {"ok": True}
+
+
+@app.post("/api/servidores/importar")
+async def importar_servidores(arquivo: UploadFile = File(...), u: dict = Depends(rh)):
+    """GEDUC de funcionarios (.csv/.xls/.xlsx) ou a planilha SGI Servidor.xlsm (aba CADASTRO)."""
+    data = await arquivo.read()
+    nome = arquivo.filename or "arquivo"
+    try:
+        recs, feriados = servidores.ler_arquivo(nome, data)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    con = db.connect()
+    out = servidores.importar(con, recs, nome)
+    if feriados:  # calendario da planilha SGI: so as datas que ainda nao estao cadastradas
+        antes = con.execute("SELECT COUNT(*) FROM feriados").fetchone()[0]
+        with con:
+            con.executemany("INSERT INTO feriados (data, tipo, descricao) VALUES (?,?,?) ON CONFLICT(data) DO NOTHING",
+                            feriados)
+        out["feriados"] = con.execute("SELECT COUNT(*) FROM feriados").fetchone()[0] - antes
+    return out
+
+
+def _pdf(conteudo: bytes, nome: str) -> Response:
+    return Response(conteudo, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+
+
+def _selecionados(con, ids: list[int]) -> list[dict]:
+    if not ids:
+        raise HTTPException(400, "Selecione ao menos um servidor")
+    if len(ids) > 5000:
+        raise HTTPException(400, "Selecione no máximo 5.000 servidores por vez")
+    rows = []
+    for i in range(0, len(ids), 500):
+        parte = ids[i:i + 500]
+        rows += [dict(r) for r in con.execute(f"SELECT * FROM servidores WHERE id IN ({','.join('?' * len(parte))})", parte)]
+    return rows
+
+
+class FrequenciaIn(BaseModel):
+    ano: int
+    mes: int
+    ids: list[int]
+
+
+@app.post("/api/servidores/frequencia")
+def pdf_frequencia(f: FrequenciaIn, u: dict = Depends(rh)):
+    """Registro individual de frequencia do mes: uma pagina por servidor, em ordem de lotacao e nome."""
+    if not (1 <= f.mes <= 12 and 2000 <= f.ano <= 2100):
+        raise HTTPException(400, "Mês ou ano inválido")
+    con = db.connect()
+    lista = sorted(_selecionados(con, f.ids), key=lambda s: (s["lotacao"] or "", s["nome_norm"], s["matricula"] or ""))
+    conteudo = servidores_pdf.frequencia(lista, f.ano, f.mes, servidores.feriados_do_mes(con, f.ano, f.mes))
+    alvo = sem_acento(lista[0]["nome"].split()[0]) if len(lista) == 1 else f"{len(lista)}_SERVIDORES"
+    return _pdf(conteudo, f"FREQUENCIA_{sem_acento(servidores.MESES[f.mes - 1])}_{f.ano}_{alvo}.pdf")
+
+
+def _escola_da_lotacao(con, lotacao: str) -> dict | None:
+    """Instituicao cadastrada com o mesmo nome da lotacao (ou com esse nome no GEDUC), para o cabecalho da declaracao."""
+    alvo = norm_nome(lotacao)
+    if not alvo:
+        return None
+    for e in con.execute("SELECT * FROM escolas"):
+        if alvo in (norm_nome(e["nome"]), norm_nome(e["geduc_nome"])):
+            reps = list(con.execute("SELECT nome, cargo, funcao_ficha FROM representantes WHERE escola_id=? ORDER BY id",
+                                    (e["id"],)))
+            dir_ = next((r for r in reps if r["funcao_ficha"] == "diretor"), None) or \
+                next((r for r in reps if any(x in (r["cargo"] or "") for x in ("GESTOR", "DIRETOR"))), None)
+            return {**dict(e), "diretor": dir_["nome"] if dir_ else ""}
+    return None
+
+
+@app.get("/api/servidores/{sid}/declaracao")
+def pdf_declaracao(sid: int, u: dict = Depends(rh)):
+    con = db.connect()
+    s = _servidor(con, sid)
+    conteudo = servidores_pdf.declaracao(s, _escola_da_lotacao(con, s["lotacao"]), datetime.now(pdf.SAO_LUIS).date())
+    return _pdf(conteudo, f"DECLARACAO_{s['matricula'] or sid}_{sem_acento(s['nome'].split()[0])}.pdf")
+
+
+class EtiquetasIn(BaseModel):
+    ids: list[int]
+    pular: int = 0
+    guias: bool = False
+
+
+@app.post("/api/servidores/etiquetas")
+def pdf_etiquetas(e: EtiquetasIn, u: dict = Depends(rh)):
+    """Etiquetas na ordem do dia do aniversario."""
+    con = db.connect()
+    lista = sorted(_selecionados(con, e.ids), key=lambda s: ((s["dt_nasc"] or "")[5:10], s["nome_norm"]))
+    return _pdf(servidores_pdf.etiquetas(lista, e.pular, e.guias), "ETIQUETAS_ANIVERSARIANTES.pdf")
+
+
+# feriados e pontos facultativos (folha de frequencia)
+
+class FeriadoIn(BaseModel):
+    tipo: str = "Feriado"
+    descricao: str = ""
+
+
+@app.get("/api/feriados")
+def listar_feriados(ano: int, u: dict = Depends(rh)):
+    con = db.connect()
+    return [dict(r) for r in con.execute("SELECT * FROM feriados WHERE data LIKE ? ORDER BY data", (f"{ano}-%",))]
+
+
+@app.put("/api/feriados/{data}")
+def salvar_feriado(data: str, f: FeriadoIn, u: dict = Depends(rh)):
+    data = _data_iso(data, "Data")
+    if not data:
+        raise HTTPException(400, "Informe a data")
+    tipo, desc = f.tipo.strip()[:30] or "Feriado", f.descricao.strip()[:60]
+    if not desc:
+        raise HTTPException(400, "Informe a descrição (sai na coluna Rubrica da saída)")
+    con = db.connect()
+    with con:
+        con.execute("""INSERT INTO feriados (data, tipo, descricao) VALUES (?,?,?)
+                       ON CONFLICT(data) DO UPDATE SET tipo=excluded.tipo, descricao=excluded.descricao""", (data, tipo, desc))
+    return {"ok": True}
+
+
+@app.delete("/api/feriados/{data}")
+def excluir_feriado(data: str, u: dict = Depends(rh)):
+    con = db.connect()
+    with con:
+        con.execute("DELETE FROM feriados WHERE data=?", (data,))
+    return {"ok": True}
+
+
+class AnoIn(BaseModel):
+    ano: int
+
+
+@app.post("/api/feriados/padrao")
+def feriados_padrao(a: AnoIn, u: dict = Depends(rh)):
+    """Inclui os feriados nacionais, do Maranhao e de Sao Luis do ano (os ja cadastrados nao mudam)."""
+    if not 2000 <= a.ano <= 2100:
+        raise HTTPException(400, "Ano inválido")
+    con = db.connect()
+    conta = lambda: con.execute("SELECT COUNT(*) FROM feriados WHERE data LIKE ?", (f"{a.ano}-%",)).fetchone()[0]
+    antes = conta()
+    with con:
+        con.executemany("INSERT INTO feriados (data, tipo, descricao) VALUES (?,?,?) ON CONFLICT(data) DO NOTHING",
+                        servidores.feriados_padrao(a.ano))
+    return {"incluidos": conta() - antes}
