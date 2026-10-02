@@ -1521,7 +1521,7 @@ async function declaracoes(modelo) {
     <div class="table-wrap" style="max-height:none"><table id="tbD"><thead><tr><th>Servidor</th><th>Matrícula</th><th>Cargo / função</th><th>Lotação</th><th>Turno</th>
       ${prof ? "<th>Tipo de ensino · atuação · disciplina(s)</th>" : "<th>Quadro</th>"}<th></th></tr></thead><tbody id="tbDBody"></tbody></table></div><div id="pgD"></div>
     <div class="card-b muted">${prof ? "Servidores do quadro Magistério. Ao gerar, informe o tipo de ensino, a atuação e as disciplinas (ficam gravados no cadastro)."
-      : "Servidores dos quadros técnico/administrativo e terceirizado (e quem está sem quadro). O modelo do administrativo será ajustado conforme o enviado pela SEMED."}</div></div>`;
+      : "Servidores dos quadros técnico/administrativo e terceirizado (e quem está sem quadro), no modelo dos administrativos da SEMED."}</div></div>`;
   const lista = () => filtrar(SRV.servidores, st).filter(s => (MODELO_DECL(s) === "professor") === prof);
   const row = s => `<tr><td><b>${esc(s.nome)}</b></td><td class="mono">${esc(s.matricula) || "—"}</td><td>${esc(s.funcao || s.cargo)}</td>
     <td>${esc(s.lotacao) || "—"}</td><td>${esc(s.turno) || `<span class="badge b-warn">sem turno</span>`}</td>

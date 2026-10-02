@@ -20,6 +20,7 @@ from reportlab.platypus import Paragraph
 
 from .pdf import _cabe
 from .servidores import MESES, abreviado, mes_ano
+from .util import sem_acento
 
 BRASAO = Path(__file__).parent / "modelos" / "brasao_sao_luis.png"
 LARG, ALT = A4
@@ -193,6 +194,16 @@ def _endereco(escola: dict) -> str:
     return " - ".join(x for x in partes if x)
 
 
+def _etapa(lotacao: str) -> str:
+    """'Ensino Fundamental', 'Educação Infantil'... pelo nome da escola (UEB ENS FUND, CRECHE, UEI...)."""
+    k = sem_acento(lotacao).upper()
+    if "FUND" in k:
+        return "Ensino Fundamental"
+    if any(x in k for x in ("INFANTIL", "CRECHE", "UEI ", "U E I")) or k.startswith("UEI"):
+        return "Educação Infantil"
+    return "Ensino"
+
+
 def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = None) -> bytes:
     """escola: instituicao cadastrada com o mesmo nome da lotacao (endereco, CEP, e-mail e INEP do cabecalho).
     docente: modelo Professor (True) ou Administrativo (False); None decide pelo quadro e pelos dados de docencia."""
@@ -224,6 +235,16 @@ def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = 
         quem = g("A referida", "O referido", "O(A) referido(a)") + " " + (
             "docente" if docente else g("servidora", "servidor", "servidor(a)"))
         paragrafos.append(f"{quem} {', '.join(jornada)}" + (", conforme a especificação abaixo:" if itens else "."))
+    if not docente:  # modelo dos administrativos enviado pela SEMED (com "servidor(a)" no lugar de "funcionaria")
+        servidor = g("servidora", "servidor", "servidor(a)")
+        partes = [f"Declaro, para os devidos fins de comprovação, que {g('a', 'o', 'o(a)')} {servidor} "
+                  f"{e(s.get('nome', ''))}, matrícula nº {e(s.get('matricula') or '—')}, é {servidor} deste "
+                  f"Estabelecimento de {_etapa(s.get('lotacao') or '')}, desenvolvendo suas atividades de {e(cargo)}"]
+        if s.get("turno"):
+            partes.append(f"no turno {e(s['turno'])}")
+        if horas:
+            partes.append(f"com uma carga horária semanal de {e(str(horas) + 'h')}")
+        paragrafos = [", ".join(partes) + "."]
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
@@ -262,6 +283,9 @@ def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = 
     y += 48
     c.setLineWidth(0.6)
     c.line(LARG / 2 - 140, ALT - y, LARG / 2 + 140, ALT - y)
+    if not docente:
+        c.setFont(NEGRITO, 11.5)
+        c.drawCentredString(LARG / 2, ALT - y - 16, "GESTOR")
     _imagem(c, DECL_RODAPE, 0, ALT - 18 - LARG * 189 / 834, LARG)
     c.showPage()
     c.save()
