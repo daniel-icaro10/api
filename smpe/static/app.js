@@ -1361,7 +1361,7 @@ async function servidores() {
         O cadastro é atualizado pela matrícula: quem já existe tem os dados do GEDUC atualizados, sem perder o que o RH completou (turno, quadro, status, atuação…). Ninguém é apagado.</p>
       <div class="drop" id="dropSrv"><svg class="i"><use href="#i-upload"/></svg>Arraste o arquivo aqui ou <label style="display:inline;color:var(--accent);cursor:pointer">escolha<input type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden></label></div>
       <div id="impSrv"></div></div></div>`}
-    <div class="card"><div class="card-h" id="fSrv">${filtrosSrv(ST_SRV)}<span class="spacer"></span><button id="turnosSrv" title="Ação única: grava o turno informado na aba CADASTRO da planilha SGI Servidor para os servidores da instituição">Carregar turnos da planilha</button><input type="file" id="turnosArq" accept=".xlsx,.xlsm" hidden>${btnXls("servidores")}<button class="primary" id="novoSrv">Novo servidor</button></div>
+    <div class="card"><div class="card-h" id="fSrv">${filtrosSrv(ST_SRV)}<span class="spacer"></span><button id="turnosSrv" title="Ação única: grava o turno e o quadro informados na aba CADASTRO da planilha SGI Servidor para os servidores da instituição">Carregar turno e quadro da planilha</button><input type="file" id="turnosArq" accept=".xlsx,.xlsm" hidden>${btnXls("servidores")}<button class="primary" id="novoSrv">Novo servidor</button></div>
       <div class="table-wrap" style="max-height:none"><table id="tbS"><thead><tr><th>Servidor</th><th>Matrícula</th><th>Cargo / função</th><th>Lotação</th><th>Turno</th><th>Quadro</th><th>Status</th><th></th></tr></thead>
       <tbody id="tbSBody"></tbody></table></div><div id="pgS"></div></div>`;
   const dz = $("#dropSrv"), envia = async f => {
@@ -1383,22 +1383,22 @@ async function servidores() {
   // acao unica: turno da aba CADASTRO para os servidores da instituicao (a do usuario ou a escolhida no filtro)
   $("#turnosSrv").onclick = () => {
     const inst = SRV.instituicao || ST_SRV.lotacao;
-    if (!inst) return toast("Escolha a instituição no filtro para carregar os turnos");
-    if (!confirm(`Gravar o turno da planilha (aba CADASTRO) para os servidores de ${inst}? O turno atual deles será substituído.`)) return;
+    if (!inst) return toast("Escolha a instituição no filtro para carregar o turno e o quadro");
+    if (!confirm(`Gravar o turno e o quadro da planilha (aba CADASTRO) para os servidores de ${inst}? O turno e o quadro atuais deles serão substituídos.`)) return;
     $("#turnosArq").value = ""; $("#turnosArq").click();
   };
   $("#turnosArq").onchange = async ev => {
     const f = ev.target.files[0]; if (!f) return;
     const fd = new FormData(); fd.append("arquivo", f); fd.append("lotacao", SRV.instituicao ? "" : ST_SRV.lotacao || "");
-    const b = $("#turnosSrv"); b.disabled = true; b.textContent = "Carregando turnos…";
+    const b = $("#turnosSrv"); b.disabled = true; b.textContent = "Carregando turno e quadro…";
     try {
       const r = await api("/api/servidores/turnos", {method: "POST", body: fd});
       await servidores();
-      modal(`<div class="mh"><h2>Turnos carregados</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
-        <div class="mb"><p><b>${fmtN(r.atualizados)}</b> servidor(es) com o turno gravado e <b>${fmtN(r.iguais)}</b> que já estavam com o turno da planilha, de ${fmtN(r.no_arquivo)} com turno na aba CADASTRO.</p>
+      modal(`<div class="mh"><h2>Turno e quadro carregados</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+        <div class="mb"><p><b>${fmtN(r.atualizados)}</b> servidor(es) atualizados e <b>${fmtN(r.iguais)}</b> que já estavam com o turno e o quadro da planilha, de ${fmtN(r.no_arquivo)} da instituição na aba CADASTRO.</p>
         ${r.nao_encontrados.length ? `<div class="alert warn">${fmtN(r.nao_encontrados.length)} da planilha não foram encontrados entre os servidores da instituição${SRV.instituicao ? " (peça ao RH para importar a planilha)" : " (importe a planilha para incluí-los)"}:<br>${r.nao_encontrados.map(esc).join("<br>")}</div>` : ""}
         ${r.outra_lotacao.length ? `<div class="alert warn">${fmtN(r.outra_lotacao.length)} estão cadastrados com outra lotação ou outra matrícula e não foram alterados (confira a lotação no cadastro):<br>${r.outra_lotacao.map(esc).join("<br>")}</div>` : ""}</div>`);
-    } catch { b.disabled = false; b.textContent = "Carregar turnos da planilha"; }
+    } catch { b.disabled = false; b.textContent = "Carregar turno e quadro da planilha"; }
   };
   const row = s => `<tr class="click" data-id="${s.id}"><td><b>${esc(s.nome)}</b>${pendSrv(s).map(p => ` <span class="badge b-warn">${p}</span>`).join("")}<div class="muted">${esc(s.setor)}</div></td>
       <td class="mono">${esc(s.matricula) || "—"}</td><td>${esc(s.cargo)}${s.funcao && s.funcao !== s.cargo ? `<div class="muted">${esc(s.funcao)}</div>` : ""}</td>
@@ -1594,7 +1594,7 @@ async function aniversariantes() {
       <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="13" value="0" style="width:64px"> etiqueta(s)</label>
       <label class="row" style="margin:0;gap:6px"><input type="checkbox" id="aGuias" style="width:auto">contorno (papel comum)</label>
       ${btnXls("aniv")}<button class="primary" id="aEtq">${icDl}Etiquetas em PDF</button></div>
-    <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Dia</th><th>Servidor</th><th>Na etiqueta</th><th>Cargo / função</th><th>Lotação</th><th class="num">Idade</th></tr></thead>
+    <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Dia</th><th>Servidor</th><th>Na etiqueta</th><th>Cargo / função</th><th>Turno</th><th>Lotação</th><th class="num">Idade</th></tr></thead>
     <tbody id="tbA"></tbody></table></div>
     <div class="card-b muted">Etiquetas A4 com 14 por folha (99 × 38,1 mm, como a Pimaco A4363/6182), na ordem do dia do aniversário.</div></div>`;
   const abrev = n => { const out = []; for (const p of n.split(/\s+/)) { out.push(p); if (out.filter(x => !["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x)).length === 2) break; }
@@ -1603,14 +1603,14 @@ async function aniversariantes() {
   const filtroAniv = () => [`Mês: ${MESES[st.mes - 1]}`, filtroTxt(st)].filter(Boolean).join(" · ");
   const lista = () => filtrar(SRV.servidores, st).filter(s => +s.dt_nasc.slice(5, 7) === st.mes).sort((a, b) => a.dt_nasc.slice(8, 10).localeCompare(b.dt_nasc.slice(8, 10)) || a.nome.localeCompare(b.nome));
   XLS.aniv = () => ({titulo: `Aniversariantes de ${MESES[st.mes - 1]}`, subtitulo: filtroAniv(),
-    colunas: [["Dia", "numero"], ["Servidor"], ["Na etiqueta"], ["Cargo"], ["Função"], ["Lotação"], ["Nascimento", "data"], ["Idade que completa", "numero"]],
-    linhas: lista().map(s => [+s.dt_nasc.slice(8, 10), s.nome, abrev(s.nome), s.cargo, s.funcao, s.lotacao, s.dt_nasc, idade(s.dt_nasc)])});
+    colunas: [["Dia", "numero"], ["Servidor"], ["Na etiqueta"], ["Cargo"], ["Função"], ["Turno"], ["Lotação"], ["Nascimento", "data"], ["Idade que completa", "numero"]],
+    linhas: lista().map(s => [+s.dt_nasc.slice(8, 10), s.nome, abrev(s.nome), s.cargo, s.funcao, s.turno, s.lotacao, s.dt_nasc, idade(s.dt_nasc)])});
   const render = () => {
     const l = lista();
     $("#nAniv").textContent = `${fmtN(l.length)} aniversariante(s) em ${MESES[st.mes - 1].toLowerCase()}` +
       (filtroTxt(st) ? ` · ${filtroTxt(st)}` : "");
     $("#tbA").innerHTML = l.map(s => `<tr><td><b>${s.dt_nasc.slice(8, 10)}/${s.dt_nasc.slice(5, 7)}</b></td><td>${esc(s.nome)}</td><td>${esc(abrev(s.nome))}</td>
-      <td>${esc(s.funcao || s.cargo)}</td><td>${esc(s.lotacao)}</td><td class="num">${idade(s.dt_nasc)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Nenhum aniversariante no filtro.</td></tr>`;
+      <td>${esc(s.funcao || s.cargo)}</td><td>${esc(s.turno) || "—"}</td><td>${esc(s.lotacao)}</td><td class="num">${idade(s.dt_nasc)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">Nenhum aniversariante no filtro.</td></tr>`;
   };
   const semData = SRV.servidores.filter(s => !s.dt_nasc).length;
   if (semData) $("#nAniv").title = `${semData} servidor(es) sem data de nascimento não aparecem aqui`;

@@ -1526,7 +1526,7 @@ async def importar_servidores(arquivo: UploadFile = File(...), u: dict = Depends
 
 @app.post("/api/servidores/turnos")
 async def carregar_turnos(arquivo: UploadFile = File(...), lotacao: str = Form(""), u: dict = Depends(srv)):
-    """Acao pontual: grava o turno da aba CADASTRO (planilha SGI Servidor) nos servidores de uma instituicao.
+    """Acao pontual: grava o turno e o quadro da aba CADASTRO (planilha SGI Servidor) nos servidores de uma instituicao.
     A instituicao carrega so a propria; o RH e o administrador escolhem a lotacao no filtro."""
     con = db.connect()
     lotacoes = u["lotacoes"]
@@ -1537,7 +1537,7 @@ async def carregar_turnos(arquivo: UploadFile = File(...), lotacao: str = Form("
             if nomes & lotacoes:
                 lotacoes |= nomes
     if not lotacoes:
-        raise HTTPException(400, "Escolha a instituição no filtro antes de carregar os turnos")
+        raise HTTPException(400, "Escolha a instituição no filtro antes de carregar o turno e o quadro")
     data = await arquivo.read()
     try:
         recs, _ = servidores.ler_arquivo(arquivo.filename or "arquivo", data)
@@ -1545,7 +1545,7 @@ async def carregar_turnos(arquivo: UploadFile = File(...), lotacao: str = Form("
         raise HTTPException(400, str(ex))
     out = servidores.carregar_turnos(con, recs, lotacoes, sem_lotacao=u["lotacoes"] is None)
     if not out["no_arquivo"]:
-        raise HTTPException(400, "O arquivo não tem servidores dessa instituição com turno informado")
+        raise HTTPException(400, "O arquivo não tem servidores dessa instituição com turno ou quadro informado")
     return out
 
 

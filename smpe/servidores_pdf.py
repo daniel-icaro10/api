@@ -327,6 +327,9 @@ def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> by
         cargo, tam = _cabe(s.get("funcao") or s.get("cargo") or "", larg, FONTE, 8.5)
         c.setFont(FONTE, tam)
         c.drawCentredString(cx, y + ETQ["alt"] - 46, cargo)
+        if s.get("turno"):
+            c.setFont(FONTE, 8)
+            c.drawCentredString(cx, y + ETQ["alt"] - 57, f"Turno: {s['turno']}")
         try:
             dn = date.fromisoformat(s.get("dt_nasc", "")[:10])
             niver = f"{dn.day:02d}/{dn.month:02d}"

@@ -128,21 +128,24 @@ def chave_lotacao(lotacao) -> str:
     return norm_nome(lotacao).replace(" ", "")
 
 
+CARGA_PONTUAL = ("turno", "quadro")
+
+
 def carregar_turnos(con, recs: list[dict], lotacoes: set[str], sem_lotacao: bool) -> dict:
-    """Acao pontual: grava o turno informado no arquivo (aba CADASTRO) para os servidores das lotacoes indicadas
-    (chave_lotacao), substituindo o turno atual. Casa pela matricula; sem matricula no cadastro, pelo CPF ou nome,
+    """Acao pontual: grava o turno e o quadro informados no arquivo (aba CADASTRO) para os servidores das lotacoes
+    indicadas (chave_lotacao), substituindo os atuais (campo vazio no arquivo nao apaga). Casa pela matricula; sem matricula no cadastro, pelo CPF ou nome,
     desde que o registro nao seja de outra matricula (outro vinculo da mesma pessoa). sem_lotacao (so RH/admin):
     servidor ainda sem lotacao, achado pela matricula, recebe a lotacao do arquivo."""
     arquivo = {}  # o primeiro registro de cada servidor vale (o CADASTRO vem antes do GEDUC)
     for r in recs:
         d = limpa(r)
-        if d.get("nome") and d.get("turno") and chave_lotacao(d.get("lotacao")) in lotacoes:
+        if d.get("nome") and any(d.get(k) for k in CARGA_PONTUAL) and chave_lotacao(d.get("lotacao")) in lotacoes:
             arquivo.setdefault(d.get("matricula") or d.get("cpf") or norm_nome(d["nome"]), d)
-    todos = [dict(r) for r in con.execute("SELECT id, nome, matricula, cpf, nome_norm, lotacao, turno FROM servidores")]
+    todos = [dict(r) for r in con.execute("SELECT id, nome, matricula, cpf, nome_norm, lotacao, turno, quadro FROM servidores")]
     da_inst = [s for s in todos if chave_lotacao(s["lotacao"]) in lotacoes]
     pela_mat = da_inst + ([s for s in todos if not s["lotacao"]] if sem_lotacao else [])
 
-    usados = set()  # cada servidor do cadastro recebe o turno de uma linha so
+    usados = set()  # cada servidor do cadastro recebe os dados de uma linha so
 
     def localiza(d: dict) -> dict | None:
         mat = d.get("matricula")
@@ -167,11 +170,15 @@ def carregar_turnos(con, recs: list[dict], lotacoes: set[str], sem_lotacao: bool
                 outro = any(x for x in todos if (d.get("matricula") and x["matricula"] == d["matricula"])
                             or (d.get("cpf") and x["cpf"] == d["cpf"]))
                 (em_outra if outro else nao_achados).append(d["nome"])
-            elif s["turno"] == d["turno"] and s["lotacao"]:
-                iguais += 1
             else:
-                con.execute(f"UPDATE servidores SET turno=?, lotacao=?, atualizado_em={_agora()} WHERE id=?",
-                            (d["turno"], s["lotacao"] or d["lotacao"], s["id"]))
+                novo = {k: d[k] for k in CARGA_PONTUAL if d.get(k) and d[k] != s[k]}
+                if not s["lotacao"]:
+                    novo["lotacao"] = d["lotacao"]
+                if not novo:
+                    iguais += 1
+                    continue
+                con.execute(f"UPDATE servidores SET {', '.join(f'{k}=?' for k in novo)}, atualizado_em={_agora()} "
+                            "WHERE id=?", (*novo.values(), s["id"]))
                 atualizados += 1
     return {"no_arquivo": len(arquivo), "atualizados": atualizados, "iguais": iguais,
             "nao_encontrados": sorted(nao_achados), "outra_lotacao": sorted(em_outra)}
