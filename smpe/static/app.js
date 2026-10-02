@@ -215,6 +215,7 @@ const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcame
   servidores, frequencia, aniversariantes, feriados};
 const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config", "usuarios"]);
 const DO_RH = new Set(["servidores", "frequencia", "aniversariantes", "feriados"]);  // perfil RH (e o administrador)
+const SO_RH = new Set(["feriados"]);  // a instituicao usa o resto do modulo, so com os servidores dela
 const TITLES = {painel: "Painel", migracao: "Matriculado", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
   relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante", config: "Configurações",
   usuarios: "Usuários", servidores: "Servidores", frequencia: "Folha de frequência", aniversariantes: "Aniversariantes do mês",
@@ -232,11 +233,11 @@ async function router() {
   let [nome = "painel", arg] = path.split("/");
   if (SO_ADMIN.has(nome) && !ehAdmin()) nome = "painel";
   if (ehRH() && !DO_RH.has(nome)) nome = "servidores";
-  if (DO_RH.has(nome) && !ehAdmin() && !ehRH()) nome = "painel";
+  if (SO_RH.has(nome) && !ehAdmin() && !ehRH()) nome = "servidores";
   const fn = ROUTES[nome] || painel;
   $$("#nav a").forEach(a => a.classList.toggle("active", a.dataset.r === nome));
   $("#title").textContent = TITLES[nome] || "Painel";
-  $("#crumb").textContent = nome === "busca" && !ehAdmin() ? SESSAO.escola_nome : CRUMBS[nome] || "SIS SMPE";
+  $("#crumb").textContent = (nome === "busca" || DO_RH.has(nome)) && SESSAO.perfil === "instituicao" ? SESSAO.escola_nome : CRUMBS[nome] || "SIS SMPE";
   $(".side").classList.remove("open");
   closeDrawer();
   $("#view").innerHTML = `<div class="empty">Carregando…</div>`;
@@ -1318,10 +1319,11 @@ async function baixarPdf(url, body, botao) {
 }
 const opts = (lista, sel, vazio = "") => `${vazio ? `<option value="">${vazio}</option>` : ""}${lista.map(v => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
 // filtros comuns das telas do RH: busca, lotacao, quadro, turno, setor e status
-const FILTRO_SRV = [["lotacao", "Todas as lotações"], ["quadro", "Todos os quadros"], ["turno", "Todos os turnos"], ["setor", "Todos os setores"], ["status", "Todos os status"]];
+const FILTRO_SRV = [["lotacao", "Todas as instituições"], ["quadro", "Todos os quadros"], ["turno", "Todos os turnos"], ["setor", "Todos os setores"], ["status", "Todos os status"]];
 function filtrosSrv(st) {
   return `<input data-f="q" placeholder="Nome, matrícula ou CPF…" value="${esc(st.q || "")}" style="max-width:240px">` +
-    FILTRO_SRV.map(([k, l]) => `<select data-f="${k}" style="max-width:220px">${opts(SRV.opcoes[k], st[k], l)}</select>`).join("");
+    FILTRO_SRV.filter(([k]) => k !== "lotacao" || !SRV.instituicao).map(([k, l]) =>
+      `<select data-f="${k}" style="max-width:${k === "lotacao" ? 300 : 220}px" title="${k === "lotacao" ? "Instituição" : ""}">${opts(SRV.opcoes[k], st[k], l)}</select>`).join("");
 }
 function ligarFiltros(box, st, render) {
   $$("[data-f]", box).forEach(el => el[el.tagName === "INPUT" ? "oninput" : "onchange"] = () => { st[el.dataset.f] = el.value.trim(); render(); });
@@ -1347,13 +1349,13 @@ async function servidores() {
       <div class="kpi"><div class="l">Técnico/administrativo</div><div class="v">${fmtN(n(s => s.quadro === "TÉCNICO/ADMINISTRATIVO"))}</div></div>
       <div class="kpi warn"><div class="l">Com dados a completar</div><div class="v">${fmtN(n(s => pendSrv(s).length))}</div><div class="s">lotação, turno, quadro…</div></div>
     </div>
-    <div class="card" style="margin-bottom:16px"><div class="card-h"><h2>Importar base</h2><span class="spacer"></span>
+    ${SRV.instituicao ? "" : `<div class="card" style="margin-bottom:16px"><div class="card-h"><h2>Importar base</h2><span class="spacer"></span>
       ${ult ? `<span class="muted">Última: ${esc(ult.arquivo)} · ${fmtN(ult.linhas)} linhas · ${fmtDH(ult.importado_em)}</span>` : ""}</div>
       <div class="card-b"><p class="muted" style="margin-top:0">Exportação de funcionários do GEDUC (.csv, .xls ou .xlsx) ou a planilha SGI Servidor.xlsm (aba CADASTRO).
         O cadastro é atualizado pela matrícula: quem já existe tem os dados do GEDUC atualizados, sem perder o que o RH completou (turno, quadro, status, atuação…). Ninguém é apagado.</p>
       <div class="drop" id="dropSrv"><svg class="i"><use href="#i-upload"/></svg>Arraste o arquivo aqui ou <label style="display:inline;color:var(--accent);cursor:pointer">escolha<input type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden></label></div>
-      <div id="impSrv"></div></div></div>
-    <div class="card"><div class="card-h" id="fSrv">${filtrosSrv(ST_SRV)}<span class="spacer"></span>${btnXls("servidores")}<button class="primary" id="novoSrv">Novo servidor</button></div>
+      <div id="impSrv"></div></div></div>`}
+    <div class="card"><div class="card-h" id="fSrv">${filtrosSrv(ST_SRV)}<span class="spacer"></span><button id="turnosSrv" title="Ação única: grava o turno informado na aba CADASTRO da planilha SGI Servidor para os servidores da instituição">Carregar turnos da planilha</button><input type="file" id="turnosArq" accept=".xlsx,.xlsm" hidden>${btnXls("servidores")}<button class="primary" id="novoSrv">Novo servidor</button></div>
       <div class="table-wrap" style="max-height:none"><table id="tbS"><thead><tr><th>Servidor</th><th>Matrícula</th><th>Cargo / função</th><th>Lotação</th><th>Turno</th><th>Quadro</th><th>Status</th><th></th></tr></thead>
       <tbody id="tbSBody"></tbody></table></div><div id="pgS"></div></div>`;
   const dz = $("#dropSrv"), envia = async f => {
@@ -1366,15 +1368,37 @@ async function servidores() {
       servidores();
     } catch (e) { $("#impSrv").innerHTML = `<div class="alert warn" style="margin-top:12px">Falha: ${esc(e.message)}</div>`; }
   };
-  dz.querySelector("input").onchange = ev => envia(ev.target.files[0]);
-  dz.ondragover = ev => { ev.preventDefault(); dz.classList.add("over"); };
-  dz.ondragleave = () => dz.classList.remove("over");
-  dz.ondrop = ev => { ev.preventDefault(); dz.classList.remove("over"); envia(ev.dataTransfer.files[0]); };
+  if (dz) {
+    dz.querySelector("input").onchange = ev => envia(ev.target.files[0]);
+    dz.ondragover = ev => { ev.preventDefault(); dz.classList.add("over"); };
+    dz.ondragleave = () => dz.classList.remove("over");
+    dz.ondrop = ev => { ev.preventDefault(); dz.classList.remove("over"); envia(ev.dataTransfer.files[0]); };
+  }
+  // acao unica: turno da aba CADASTRO para os servidores da instituicao (a do usuario ou a escolhida no filtro)
+  $("#turnosSrv").onclick = () => {
+    const inst = SRV.instituicao || ST_SRV.lotacao;
+    if (!inst) return toast("Escolha a instituição no filtro para carregar os turnos");
+    if (!confirm(`Gravar o turno da planilha (aba CADASTRO) para os servidores de ${inst}? O turno atual deles será substituído.`)) return;
+    $("#turnosArq").value = ""; $("#turnosArq").click();
+  };
+  $("#turnosArq").onchange = async ev => {
+    const f = ev.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append("arquivo", f); fd.append("lotacao", ST_SRV.lotacao || "");
+    const b = $("#turnosSrv"); b.disabled = true; b.textContent = "Carregando turnos…";
+    try {
+      const r = await api("/api/servidores/turnos", {method: "POST", body: fd});
+      await servidores();
+      modal(`<div class="mh"><h2>Turnos carregados</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+        <div class="mb"><p><b>${fmtN(r.atualizados)}</b> servidor(es) com o turno gravado e <b>${fmtN(r.iguais)}</b> que já estavam com o turno da planilha, de ${fmtN(r.no_arquivo)} com turno na aba CADASTRO.</p>
+        ${r.nao_encontrados.length ? `<div class="alert warn">${fmtN(r.nao_encontrados.length)} da planilha não estão no cadastro (importe a planilha para incluí-los):<br>${r.nao_encontrados.map(esc).join("<br>")}</div>` : ""}</div>`);
+    } catch { b.disabled = false; b.textContent = "Carregar turnos da planilha"; }
+  };
   const row = s => `<tr class="click" data-id="${s.id}"><td><b>${esc(s.nome)}</b>${pendSrv(s).map(p => ` <span class="badge b-warn">${p}</span>`).join("")}<div class="muted">${esc(s.setor)}</div></td>
       <td class="mono">${esc(s.matricula) || "—"}</td><td>${esc(s.cargo)}${s.funcao && s.funcao !== s.cargo ? `<div class="muted">${esc(s.funcao)}</div>` : ""}</td>
       <td>${esc(s.lotacao) || "—"}</td><td>${esc(s.turno) || "—"}</td><td>${esc(s.quadro) || "—"}</td>
       <td>${s.status === "INATIVO" ? `<span class="badge b-mute">inativo</span>` : `<span class="badge b-ok">ativo</span>`}</td>
-      <td class="acoes"><div class="row"><button class="btn-dl btn-sm" data-decl="${s.id}" title="Declaração de efetivo exercício e endereço profissional">${icDl}Declaração</button>
+      <td class="acoes"><div class="row"><button class="btn-sm" data-edit="${s.id}" title="Editar os dados do servidor">Editar</button>
+        <button class="btn-dl btn-sm" data-decl="${s.id}" title="Declaração de efetivo exercício e endereço profissional">${icDl}Declaração</button>
         <button class="btn-dl btn-sm" data-freq="${s.id}" title="Folha de frequência do mês atual">${icDl}Frequência</button></div></td></tr>`;
   const lista = () => filtrar(l, ST_SRV);
   XLS.servidores = () => ({titulo: "Servidores", subtitulo: filtroTxt(ST_SRV),
@@ -1394,9 +1418,26 @@ async function servidores() {
   $("#novoSrv").onclick = () => editarServidor(null);
   $("#tbS").onclick = ev => {
     const b = ev.target.closest("button");
-    if (b?.dataset.decl) return baixarPdf(`/api/servidores/${b.dataset.decl}/declaracao`, null, b);
+    if (b?.dataset.decl) return declaracao(l.find(s => s.id === +b.dataset.decl));
     if (b?.dataset.freq) { const h = new Date(); return baixarPdf("/api/servidores/frequencia", {ano: h.getFullYear(), mes: h.getMonth() + 1, ids: [+b.dataset.freq]}, b); }
     const tr = ev.target.closest("tr[data-id]"); if (tr) editarServidor(l.find(s => s.id === +tr.dataset.id));
+  };
+}
+// declaracao: como na aba DECLARACAO, pede tipo de ensino, atuacao e disciplina(s) (ja vem o que esta no cadastro)
+function declaracao(s) {
+  const lista = (k, v) => `<select name="${k}">${opts([...new Set([...SRV.opcoes[k], v].filter(Boolean))], v, "—")}</select>`;
+  modal(`<div class="mh"><h2>Declaração</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form class="mb form" id="fDecl"><div class="full"><b>${esc(s.nome)}</b><div class="muted">Matrícula ${esc(s.matricula) || "—"} · ${esc(s.lotacao) || "sem lotação"} · ${esc(s.turno) || "sem turno"}</div></div>
+      <div class="full"><label>Tipo de ensino</label>${lista("tipo_ensino", s.tipo_ensino)}</div>
+      <div class="full"><label>Atuação</label>${lista("atuacao", s.atuacao)}</div>
+      <div class="full"><label>Disciplina(s)</label><input name="componente" value="${esc(s.componente)}" placeholder="Ex.: História/Geografia"></div>
+      <div class="full muted">Ficam gravados no cadastro do servidor. Para quem não é docente, deixe em branco.</div>
+      <div class="full row"><span class="spacer"></span><button class="primary">${icDl}Gerar declaração</button></div></form>`);
+  $("#fDecl").onsubmit = async ev => {
+    ev.preventDefault();
+    const body = Object.fromEntries(new FormData(ev.target));
+    await baixarPdf(`/api/servidores/${s.id}/declaracao`, body, ev.submitter);
+    Object.assign(s, body); closeModal();
   };
 }
 const CAMPOS_SRV = [
@@ -1407,8 +1448,8 @@ const CAMPOS_SRV = [
   ["Cargo e vínculo"], ["cargo", "Cargo", "lista"], ["funcao", "Função", "lista"], ["regime_contratacao", "Regime de contratação", "lista"],
   ["regime_juridico", "Regime jurídico", "lista"], ["situacao_funcional", "Situação funcional", "lista"], ["carga_horaria", "Carga horária (GEDUC)"],
   ["horas_semanais", "Horas semanais (declaração)"], ["dt_admissao", "Data de exercício (admissão)", "date"], ["orgao", "Órgão"],
-  ["Docência e formação (declaração)"], ["tipo_ensino", "Tipo de ensino", "lista"], ["atuacao", "Atuação", "lista"],
-  ["componente", "Disciplina(s) / componente(s) curricular(es)", "text", "full"], ["formacao", "Formação (graduação)"], ["habilitacao", "Habilitação (curso)"],
+  ["Docência (sai na declaração)"], ["tipo_ensino", "Tipo de ensino", "lista"], ["atuacao", "Atuação", "lista"],
+  ["componente", "Disciplina(s)", "text", "full"], ["Formação"], ["formacao", "Formação (graduação)"], ["habilitacao", "Habilitação (curso)"],
 ];
 function editarServidor(s) {
   const novo = !s; s = s || {status: "ATIVO", orgao: "SEMED"};
@@ -1416,7 +1457,8 @@ function editarServidor(s) {
     if (!l) return `<h3 class="full" style="margin:8px 0 0">${k}</h3>`;
     const v = s[k] || "";
     const sel = lista => `<select name="${k}">${opts([...new Set([...lista, v].filter(Boolean))], v, "—")}</select>`;
-    const ctl = Array.isArray(t) ? sel(t) : t === "turno" || t === "quadro" || t === "status" ? sel(SRV.opcoes[t])
+    const ctl = k === "lotacao" && SRV.instituicao ? `<input name="${k}" value="${esc(v || SRV.opcoes.lotacao[0] || "")}" readonly>`
+      : Array.isArray(t) ? sel(t) : t === "turno" || t === "quadro" || t === "status" ? sel(SRV.opcoes[t])
       : t === "lista" ? `<input name="${k}" list="dl_${k}" value="${esc(v)}" autocomplete="off"><datalist id="dl_${k}">${(SRV.opcoes[k] || []).map(o => `<option value="${esc(o)}">`).join("")}</datalist>`
       : `<input name="${k}" type="${t === "date" ? "date" : "text"}" value="${esc(t === "cpf" ? fmtCPF(v) : v)}">`;
     return `<div class="${cls}"><label>${l}</label>${ctl}</div>`;
@@ -1426,11 +1468,11 @@ function editarServidor(s) {
       ${novo ? "" : `<div style="margin-top:6px">${pendSrv(s).map(p => `<span class="badge b-warn">${p}</span>`).join("")}</div>`}</div>
       <button onclick="closeDrawer()">Fechar</button></div>
     <div class="db">
-      ${novo ? "" : `<div class="row" style="margin-bottom:12px"><button class="btn-dl" id="sDecl">${icDl}Declaração</button>
+      ${novo ? "" : `<div class="row" style="margin-bottom:12px"><button class="btn-dl" id="sDecl" type="button">${icDl}Declaração</button>
         <select id="sMes" style="width:auto">${MESES.map((m, i) => `<option value="${i + 1}" ${i === new Date().getMonth() ? "selected" : ""}>${m}</option>`).join("")}</select>
         <input id="sAno" type="number" value="${new Date().getFullYear()}" style="width:90px"><button class="btn-dl" id="sFreq">${icDl}Folha de frequência</button></div>`}
       <form id="fSrvEd" class="form">${CAMPOS_SRV.map(campo).join("")}
-        <div class="full row"><button class="primary">Salvar</button>${novo ? "" : `<span class="spacer"></span><button type="button" class="danger" id="sExc">Excluir</button>`}</div></form></div>`);
+        <div class="full row"><button class="primary">Salvar</button>${novo || SRV.instituicao ? "" : `<span class="spacer"></span><button type="button" class="danger" id="sExc">Excluir</button>`}</div></form></div>`);
   const f = $("#fSrvEd");
   f.nome.required = true;
   f.onsubmit = async ev => {
@@ -1440,9 +1482,9 @@ function editarServidor(s) {
     toast("Servidor salvo"); closeDrawer(); servidores();
   };
   if (novo) return;
-  $("#sDecl").onclick = ev => baixarPdf(`/api/servidores/${s.id}/declaracao`, null, ev.currentTarget);
+  $("#sDecl").onclick = () => declaracao(s);
   $("#sFreq").onclick = ev => baixarPdf("/api/servidores/frequencia", {ano: +$("#sAno").value, mes: +$("#sMes").value, ids: [s.id]}, ev.currentTarget);
-  $("#sExc").onclick = async () => {
+  if ($("#sExc")) $("#sExc").onclick = async () => {
     if (!confirm(`Excluir ${s.nome} do cadastro de servidores?`)) return;
     await api(`/api/servidores/${s.id}`, {method: "DELETE"}); toast("Servidor excluído"); closeDrawer(); servidores();
   };
@@ -1473,9 +1515,9 @@ async function frequencia() {
   };
   const feriadosMes = async () => {
     const ano = await api(`/api/feriados?ano=${st.ano}`), fs = ano.filter(f => +f.data.slice(5, 7) === st.mes);
-    $("#ferMes").innerHTML = !ano.length ? `<div class="alert warn" style="margin:0">Nenhum feriado cadastrado em ${st.ano}. <a href="#/feriados?ano=${st.ano}">Cadastre os feriados</a> para marcá-los na folha.</div>`
+    $("#ferMes").innerHTML = !ano.length ? `<div class="alert warn" style="margin:0">Nenhum feriado cadastrado em ${st.ano}. ${SRV.instituicao ? "Peça ao RH da SEMED para cadastrar os feriados" : `<a href="#/feriados?ano=${st.ano}">Cadastre os feriados</a>`} para marcá-los na folha.</div>`
       : `<label>Feriados e pontos facultativos do mês</label><div>${fs.map(f => `<span class="badge b-err">${fmtData(f.data).slice(0, 5)} · ${esc(f.descricao)}</span>`).join(" ") || `<span class="muted">nenhum</span>`}
-        <a class="btn-sm btn" href="#/feriados?ano=${st.ano}" style="margin-left:6px">Editar feriados</a></div>`;
+        ${SRV.instituicao ? "" : `<a class="btn-sm btn" href="#/feriados?ano=${st.ano}" style="margin-left:6px">Editar feriados</a>`}</div>`;
   };
   ligarFiltros($("#fFreq"), st, () => { resetPag("freq"); render(); });
   $("#fMes").onchange = ev => { st.mes = +ev.target.value; render(); feriadosMes(); };

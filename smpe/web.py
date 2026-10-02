@@ -180,6 +180,20 @@ def rh(u: dict = Depends(usuario)) -> dict:
     return u
 
 
+def srv(u: dict = Depends(usuario)) -> dict:
+    """Modulo Servidores: o RH e o administrador veem todos; a instituicao, so os servidores lotados nela
+    (lotacao igual ao nome da instituicao ou ao nome dela no GEDUC)."""
+    if u["perfil"] in ("admin", "rh"):
+        return {**u, "lotacoes": None}
+    e = db.connect().execute("SELECT nome, geduc_nome FROM escolas WHERE id=?", (u["escola_id"],)).fetchone()
+    nomes = [x for x in (e["geduc_nome"], e["nome"]) if x] if e else []
+    return {**u, "lotacoes": {norm_nome(x) for x in nomes}, "lotacao_padrao": nomes[0] if nomes else ""}
+
+
+def _no_escopo(u: dict, s) -> bool:
+    return u["lotacoes"] is None or norm_nome(s["lotacao"]) in u["lotacoes"]
+
+
 def admin(u: dict = Depends(usuario)) -> dict:
     if u["perfil"] != "admin":
         raise HTTPException(403, "Somente o administrador pode fazer isso")
@@ -1410,8 +1424,10 @@ class ServidorIn(BaseModel):
     componente: str | None = ""
 
 
-def _servidor_vals(con, d: ServidorIn, sid: int | None) -> dict:
+def _servidor_vals(con, d: ServidorIn, sid: int | None, u: dict) -> dict:
     v = _limpo(d)
+    if u["lotacoes"] is not None and norm_nome(v["lotacao"]) not in u["lotacoes"]:
+        v["lotacao"] = u["lotacao_padrao"]  # a instituicao cadastra e edita so servidores lotados nela
     for k in ("dt_nasc", "dt_admissao"):
         v[k] = _data_iso(v[k], "Data de nascimento" if k == "dt_nasc" else "Data de admissão")
     v = {k: servidores.normaliza(k, x) for k, x in v.items()}
@@ -1427,18 +1443,20 @@ def _servidor_vals(con, d: ServidorIn, sid: int | None) -> dict:
     return v
 
 
-def _servidor(con, sid: int) -> dict:
+def _servidor(con, sid: int, u: dict) -> dict:
     r = con.execute("SELECT * FROM servidores WHERE id=?", (sid,)).fetchone()
     if not r:
         raise HTTPException(404, "Servidor não encontrado")
+    if not _no_escopo(u, r):
+        raise HTTPException(403, "Servidor de outra instituição")
     return dict(r)
 
 
 @app.get("/api/servidores")
-def listar_servidores(u: dict = Depends(rh)):
+def listar_servidores(u: dict = Depends(srv)):
     con = db.connect()
     lista = [{k: r[k] if k == "id" else r[k] or "" for k in ("id", *servidores.CAMPOS, "atualizado_em")}
-             for r in con.execute("SELECT * FROM servidores ORDER BY nome_norm, matricula")]
+             for r in con.execute("SELECT * FROM servidores ORDER BY nome_norm, matricula") if _no_escopo(u, r)]
 
     def distintos(c, base=()):
         return sorted({*base, *(s[c] for s in lista if s[c])})
@@ -1450,13 +1468,16 @@ def listar_servidores(u: dict = Depends(rh)):
     opcoes.update(quadro=distintos("quadro", servidores.QUADROS), turno=distintos("turno", servidores.TURNOS),
                   status=servidores.STATUS, tipo_ensino=distintos("tipo_ensino", servidores.TIPOS_ENSINO),
                   atuacao=distintos("atuacao", servidores.ATUACOES))
-    return {"servidores": lista, "ultima_importacao": dict(ult) if ult else None, "opcoes": opcoes}
+    if u["lotacoes"] is not None:  # a instituicao nao escolhe a lotacao: e sempre a dela
+        opcoes["lotacao"] = sorted({u["lotacao_padrao"], *opcoes["lotacao"]} - {""})
+    return {"servidores": lista, "ultima_importacao": dict(ult) if ult else None, "opcoes": opcoes,
+            "instituicao": u["escola_nome"] if u["lotacoes"] is not None else ""}
 
 
 @app.post("/api/servidores")
-def criar_servidor(d: ServidorIn, u: dict = Depends(rh)):
+def criar_servidor(d: ServidorIn, u: dict = Depends(srv)):
     con = db.connect()
-    v = _servidor_vals(con, d, None)
+    v = _servidor_vals(con, d, None, u)
     with con:
         sid = con.execute(f"INSERT INTO servidores ({', '.join(v)}, nome_norm) VALUES ({', '.join('?' * (len(v) + 1))}) "
                           "RETURNING id", (*v.values(), norm_nome(v["nome"]))).fetchone()[0]
@@ -1464,10 +1485,10 @@ def criar_servidor(d: ServidorIn, u: dict = Depends(rh)):
 
 
 @app.put("/api/servidores/{sid}")
-def editar_servidor(sid: int, d: ServidorIn, u: dict = Depends(rh)):
+def editar_servidor(sid: int, d: ServidorIn, u: dict = Depends(srv)):
     con = db.connect()
-    _servidor(con, sid)
-    v = _servidor_vals(con, d, sid)
+    _servidor(con, sid, u)
+    v = _servidor_vals(con, d, sid, u)
     with con:
         con.execute(f"UPDATE servidores SET {', '.join(f'{k}=?' for k in v)}, nome_norm=?, "
                     f"atualizado_em={servidores._agora()} WHERE id=?", (*v.values(), norm_nome(v["nome"]), sid))
@@ -1502,11 +1523,29 @@ async def importar_servidores(arquivo: UploadFile = File(...), u: dict = Depends
     return out
 
 
+@app.post("/api/servidores/turnos")
+async def carregar_turnos(arquivo: UploadFile = File(...), lotacao: str = Form(""), u: dict = Depends(srv)):
+    """Acao pontual: grava o turno da aba CADASTRO (planilha SGI Servidor) nos servidores de uma instituicao.
+    A instituicao carrega so a propria; o RH e o administrador escolhem a lotacao no filtro."""
+    lotacoes = u["lotacoes"] if u["lotacoes"] is not None else {norm_nome(lotacao)} - {""}
+    if not lotacoes:
+        raise HTTPException(400, "Escolha a instituição no filtro antes de carregar os turnos")
+    data = await arquivo.read()
+    try:
+        recs, _ = servidores.ler_arquivo(arquivo.filename or "arquivo", data)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    out = servidores.carregar_turnos(db.connect(), recs, lotacoes)
+    if not out["no_arquivo"]:
+        raise HTTPException(400, "O arquivo não tem servidores dessa instituição com turno informado")
+    return out
+
+
 def _pdf(conteudo: bytes, nome: str) -> Response:
     return Response(conteudo, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
 
-def _selecionados(con, ids: list[int]) -> list[dict]:
+def _selecionados(con, ids: list[int], u: dict) -> list[dict]:
     if not ids:
         raise HTTPException(400, "Selecione ao menos um servidor")
     if len(ids) > 5000:
@@ -1515,6 +1554,8 @@ def _selecionados(con, ids: list[int]) -> list[dict]:
     for i in range(0, len(ids), 500):
         parte = ids[i:i + 500]
         rows += [dict(r) for r in con.execute(f"SELECT * FROM servidores WHERE id IN ({','.join('?' * len(parte))})", parte)]
+    if not all(_no_escopo(u, r) for r in rows):
+        raise HTTPException(403, "Servidor de outra instituição")
     return rows
 
 
@@ -1525,12 +1566,12 @@ class FrequenciaIn(BaseModel):
 
 
 @app.post("/api/servidores/frequencia")
-def pdf_frequencia(f: FrequenciaIn, u: dict = Depends(rh)):
+def pdf_frequencia(f: FrequenciaIn, u: dict = Depends(srv)):
     """Registro individual de frequencia do mes: uma pagina por servidor, em ordem de lotacao e nome."""
     if not (1 <= f.mes <= 12 and 2000 <= f.ano <= 2100):
         raise HTTPException(400, "Mês ou ano inválido")
     con = db.connect()
-    lista = sorted(_selecionados(con, f.ids), key=lambda s: (s["lotacao"] or "", s["nome_norm"], s["matricula"] or ""))
+    lista = sorted(_selecionados(con, f.ids, u), key=lambda s: (s["lotacao"] or "", s["nome_norm"], s["matricula"] or ""))
     conteudo = servidores_pdf.frequencia(lista, f.ano, f.mes, servidores.feriados_do_mes(con, f.ano, f.mes))
     alvo = sem_acento(lista[0]["nome"].split()[0]) if len(lista) == 1 else f"{len(lista)}_SERVIDORES"
     return _pdf(conteudo, f"FREQUENCIA_{sem_acento(servidores.MESES[f.mes - 1])}_{f.ano}_{alvo}.pdf")
@@ -1551,10 +1592,23 @@ def _escola_da_lotacao(con, lotacao: str) -> dict | None:
     return None
 
 
-@app.get("/api/servidores/{sid}/declaracao")
-def pdf_declaracao(sid: int, u: dict = Depends(rh)):
+class DeclaracaoIn(BaseModel):
+    tipo_ensino: str | None = ""
+    atuacao: str | None = ""
+    componente: str | None = ""
+
+
+@app.post("/api/servidores/{sid}/declaracao")
+def pdf_declaracao(sid: int, d: DeclaracaoIn, u: dict = Depends(srv)):
+    """Tipo de ensino, atuacao e disciplina(s) informados na hora (como na aba DECLARACAO) ficam no cadastro."""
     con = db.connect()
-    s = _servidor(con, sid)
+    s = _servidor(con, sid, u)
+    v = {k: servidores.normaliza(k, x) for k, x in _limpo(d).items()}
+    if any((s[k] or "") != x for k, x in v.items()):
+        with con:
+            con.execute(f"UPDATE servidores SET {', '.join(f'{k}=?' for k in v)}, atualizado_em={servidores._agora()} "
+                        "WHERE id=?", (*v.values(), sid))
+        s.update(v)
     conteudo = servidores_pdf.declaracao(s, _escola_da_lotacao(con, s["lotacao"]), datetime.now(pdf.SAO_LUIS).date())
     return _pdf(conteudo, f"DECLARACAO_{s['matricula'] or sid}_{sem_acento(s['nome'].split()[0])}.pdf")
 
@@ -1566,10 +1620,10 @@ class EtiquetasIn(BaseModel):
 
 
 @app.post("/api/servidores/etiquetas")
-def pdf_etiquetas(e: EtiquetasIn, u: dict = Depends(rh)):
+def pdf_etiquetas(e: EtiquetasIn, u: dict = Depends(srv)):
     """Etiquetas na ordem do dia do aniversario."""
     con = db.connect()
-    lista = sorted(_selecionados(con, e.ids), key=lambda s: ((s["dt_nasc"] or "")[5:10], s["nome_norm"]))
+    lista = sorted(_selecionados(con, e.ids, u), key=lambda s: ((s["dt_nasc"] or "")[5:10], s["nome_norm"]))
     return _pdf(servidores_pdf.etiquetas(lista, e.pular, e.guias), "ETIQUETAS_ANIVERSARIANTES.pdf")
 
 
@@ -1581,7 +1635,7 @@ class FeriadoIn(BaseModel):
 
 
 @app.get("/api/feriados")
-def listar_feriados(ano: int, u: dict = Depends(rh)):
+def listar_feriados(ano: int, u: dict = Depends(srv)):
     con = db.connect()
     return [dict(r) for r in con.execute("SELECT * FROM feriados WHERE data LIKE ? ORDER BY data", (f"{ano}-%",))]
 

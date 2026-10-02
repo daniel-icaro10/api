@@ -9,7 +9,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from reportlab.lib.colors import HexColor, black
-from reportlab.lib.enums import TA_JUSTIFY
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
@@ -198,7 +198,7 @@ def declaracao(s: dict, escola: dict | None, hoje: date) -> bytes:
     escola = escola or {}
     fem, masc = s.get("sexo") == "FEMININO", s.get("sexo") == "MASCULINO"
     g = (lambda f, m, x: f if fem else m if masc else x)
-    docente = s.get("quadro") == "MAGISTÉRIO" or bool(s.get("componente") or s.get("atuacao"))
+    docente = s.get("quadro") == "MAGISTÉRIO" or any(s.get(k) for k in ("tipo_ensino", "atuacao", "componente"))
     e = lambda v: f"<b>{escape(str(v))}</b>"
     cargo = s.get("funcao") or s.get("cargo") or "—"
     horas = s.get("horas_semanais") or s.get("carga_horaria")
@@ -247,7 +247,7 @@ def declaracao(s: dict, escola: dict | None, hoje: date) -> bytes:
     c.drawCentredString(LARG / 2, ALT - y, "DECLARAÇÃO DE EFETIVO EXERCÍCIO E ENDEREÇO PROFISSIONAL")
     y += 50
     corpo = ParagraphStyle("d", fontName=FONTE, fontSize=11.5, leading=23.5, alignment=TA_JUSTIFY, firstLineIndent=48)
-    espec = ParagraphStyle("i", parent=corpo, fontName=ITALICO, firstLineIndent=0, leftIndent=48)
+    espec = ParagraphStyle("i", parent=corpo, fontName=ITALICO, firstLineIndent=0, leftIndent=48, alignment=TA_LEFT)
     esq, larg = 43, LARG - 86
     for txt, st in [(t, corpo) for t in paragrafos] + [(t, espec) for t in itens]:
         par = Paragraph(txt, st)
