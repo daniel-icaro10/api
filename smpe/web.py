@@ -137,7 +137,7 @@ def _bloqueio_msg(motivo: str) -> str:
 
 def _instituicoes(con, uid: int) -> list[dict]:
     return [dict(r) for r in con.execute(
-        """SELECT e.id, e.nome, e.bloqueado, e.motivo_bloqueio FROM usuario_escolas ue
+        """SELECT e.id, e.nome, e.geduc_nome, e.bloqueado, e.motivo_bloqueio FROM usuario_escolas ue
            JOIN escolas e ON e.id = ue.escola_id WHERE ue.usuario_id=? ORDER BY e.nome""", (uid,))]
 
 
@@ -149,7 +149,7 @@ def _escopo(insts: list[dict], preferida: int | None) -> dict:
     if not livres:
         raise HTTPException(403, _bloqueio_msg(insts[0]["motivo_bloqueio"]))
     ativa = next((e for e in livres if e["id"] == preferida), livres[0])
-    return {"escola_id": ativa["id"], "escola_nome": ativa["nome"],
+    return {"escola_id": ativa["id"], "escola_nome": ativa["nome"], "escola_geduc": ativa["geduc_nome"] or "",
             "escolas": [{"id": e["id"], "nome": e["nome"]} for e in livres]}
 
 
@@ -185,8 +185,7 @@ def srv(u: dict = Depends(usuario)) -> dict:
     (lotacao igual ao nome da instituicao ou ao nome dela no GEDUC)."""
     if u["perfil"] in ("admin", "rh"):
         return {**u, "lotacoes": None}
-    e = db.connect().execute("SELECT nome, geduc_nome FROM escolas WHERE id=?", (u["escola_id"],)).fetchone()
-    nomes = [x for x in (e["geduc_nome"], e["nome"]) if x] if e else []
+    nomes = [x for x in (u.get("escola_geduc"), u["escola_nome"]) if x]
     return {**u, "lotacoes": {servidores.chave_lotacao(x) for x in nomes}, "lotacao_padrao": nomes[0] if nomes else ""}
 
 
@@ -1437,18 +1436,18 @@ def _servidor_vals(con, d: ServidorIn, sid: int | None, u: dict) -> dict:
         raise HTTPException(400, "CPF inválido")
     v["status"] = v["status"] or "ATIVO"
     if v["matricula"]:
-        outro = con.execute("SELECT id, nome FROM servidores WHERE matricula=?", (v["matricula"],)).fetchone()
+        outro = con.execute("SELECT id, nome, lotacao FROM servidores WHERE matricula=?", (v["matricula"],)).fetchone()
         if outro and outro["id"] != sid:  # a instituicao nao fica sabendo quem e de outra instituicao
-            dono = outro["nome"] if u["lotacoes"] is None or _no_escopo(u, _servidor(con, outro["id"], None))                 else "um servidor de outra instituição"
+            dono = outro["nome"] if _no_escopo(u, outro) else "um servidor de outra instituição"
             raise HTTPException(400, f"A matrícula {v['matricula']} já é de {dono}")
     return v
 
 
-def _servidor(con, sid: int, u: dict | None) -> dict:
+def _servidor(con, sid: int, u: dict) -> dict:
     r = con.execute("SELECT * FROM servidores WHERE id=?", (sid,)).fetchone()
     if not r:
         raise HTTPException(404, "Servidor não encontrado")
-    if u and not _no_escopo(u, r):
+    if not _no_escopo(u, r):
         raise HTTPException(403, "Servidor de outra instituição")
     return dict(r)
 
@@ -1613,8 +1612,8 @@ def pdf_declaracao(sid: int, d: DeclaracaoIn, u: dict = Depends(srv)):
     cadastro. Administrativo: sem a parte de docencia."""
     con = db.connect()
     s = _servidor(con, sid, u)
-    v = _limpo(d)
-    modelo = v.pop("modelo")
+    v = {k: x for k, x in _limpo(d).items() if k in d.model_fields_set}  # campo ausente nao apaga o cadastro
+    modelo = v.pop("modelo", "")
     if modelo not in ("", "professor", "administrativo"):
         raise HTTPException(400, "Modelo de declaração inválido")
     v = {k: servidores.normaliza(k, x) for k, x in v.items()} if modelo != "administrativo" else {}

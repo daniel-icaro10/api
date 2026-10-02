@@ -63,7 +63,7 @@ const ehRH = () => SESSAO?.perfil === "rh";
 const iniciais = n => (n || "?").split(/\s+/).filter(w => w.length > 2).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
 const waLink = n => `https://wa.me/${n.length <= 11 ? "55" + n : n}`;
 function mostrarLogin(msg = "") {
-  SESSAO = null; ESCOLAS = [];
+  SESSAO = null; ESCOLAS = []; limparFiltrosSrv();
   const setup = !!PUBLICO.precisa_setup;
   $("#loginTitulo").textContent = setup ? "Primeiro acesso" : "Entrar";
   $("#loginSub").textContent = setup ? "Informe o e-mail e crie a senha do administrador do sistema." : "Acesse com o seu e-mail e a sua senha.";
@@ -1343,6 +1343,13 @@ const filtroTxt = st => [st.q && `Busca: ${st.q}`, ...FILTRO_SRV.map(([k]) => k 
 const pendSrv = s => [!s.lotacao && "sem lotação", !s.turno && "sem turno", !s.quadro && "sem quadro", !s.matricula && "sem matrícula", !s.dt_nasc && "sem nascimento"].filter(Boolean);
 
 const ST_SRV = {status: "ATIVO"};
+const reinicia = (st, base) => { Object.keys(st).forEach(k => delete st[k]); Object.assign(st, base); };
+function limparFiltrosSrv() {
+  const h = new Date();
+  reinicia(ST_SRV, {status: "ATIVO"}); reinicia(ST_ANIV, {status: "ATIVO", mes: h.getMonth() + 1});
+  reinicia(ST_FREQ, {status: "ATIVO", mes: h.getMonth() + 1, ano: h.getFullYear()});
+  Object.values(ST_DECL).forEach(st => reinicia(st, {status: "ATIVO"}));
+}
 async function servidores() {
   await loadServidores();
   const l = SRV.servidores, ult = SRV.ultima_importacao;
@@ -1425,7 +1432,7 @@ async function servidores() {
   $("#novoSrv").onclick = () => editarServidor(null);
   $("#tbS").onclick = ev => {
     const b = ev.target.closest("button");
-    if (b?.dataset.decl) return declaracao(l.find(s => s.id === +b.dataset.decl));
+    if (b?.dataset.decl) return declaracao(l.find(s => s.id === +b.dataset.decl), "", render);
     if (b?.dataset.freq) { const h = new Date(); return baixarPdf("/api/servidores/frequencia", {ano: h.getFullYear(), mes: h.getMonth() + 1, ids: [+b.dataset.freq]}, b); }
     const tr = ev.target.closest("tr[data-id]"); if (tr) editarServidor(l.find(s => s.id === +tr.dataset.id));
   };
@@ -1504,7 +1511,10 @@ function editarServidor(s) {
     toast("Servidor salvo"); closeDrawer(); servidores();
   };
   if (novo) return;
-  $("#sDecl").onclick = () => declaracao(s);
+  $("#sDecl").onclick = () => {
+    const doc = ["tipo_ensino", "atuacao", "componente"], atual = {...s, ...Object.fromEntries(doc.map(k => [k, f[k].value]))};
+    declaracao(atual, "", () => doc.forEach(k => s[k] = atual[k]));
+  };
   $("#sFreq").onclick = ev => baixarPdf("/api/servidores/frequencia", {ano: +$("#sAno").value, mes: +$("#sMes").value, ids: [s.id]}, ev.currentTarget);
   if ($("#sExc")) $("#sExc").onclick = async () => {
     if (!confirm(`Excluir ${s.nome} do cadastro de servidores?`)) return;

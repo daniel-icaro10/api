@@ -124,8 +124,9 @@ def importar(con, recs: list[dict], arquivo: str) -> dict:
 
 
 def chave_lotacao(lotacao) -> str:
-    """Compara lotacoes sem pontuacao nem espacos ('U.E.B. PROF. SA VALLE' = 'UEB PROF SA VALLE')."""
-    return norm_nome(lotacao).replace(" ", "")
+    """Compara lotacoes sem acento, pontuacao nem espacos ('U.E.B. PROF. SA VALLE' = 'UEB PROF SA VALLE'), mas com
+    os numeros ('CRECHE 10' e 'CRECHE 11' sao instituicoes diferentes). E a chave do acesso da instituicao."""
+    return re.sub(r"[^A-Z0-9]", "", sem_acento(str(lotacao or "")).upper())
 
 
 CARGA_PONTUAL = ("turno", "quadro")

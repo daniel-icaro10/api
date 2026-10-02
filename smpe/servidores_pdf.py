@@ -20,7 +20,7 @@ from reportlab.platypus import Paragraph
 
 from .pdf import _cabe
 from .servidores import MESES, abreviado, mes_ano
-from .util import sem_acento
+from .util import norm_nome
 
 BRASAO = Path(__file__).parent / "modelos" / "brasao_sao_luis.png"
 LARG, ALT = A4
@@ -196,10 +196,10 @@ def _endereco(escola: dict) -> str:
 
 def _etapa(lotacao: str) -> str:
     """'Ensino Fundamental', 'Educação Infantil'... pelo nome da escola (UEB ENS FUND, CRECHE, UEI...)."""
-    k = sem_acento(lotacao).upper()
-    if "FUND" in k:
+    palavras = norm_nome(lotacao).split()
+    if {"FUND", "FUNDAMENTAL"} & set(palavras):
         return "Ensino Fundamental"
-    if any(x in k for x in ("INFANTIL", "CRECHE", "UEI ", "U E I")) or k.startswith("UEI"):
+    if {"INFANTIL", "CRECHE", "UEI"} & set(palavras) or "".join(palavras).startswith("UEI"):
         return "Educação Infantil"
     return "Ensino"
 
@@ -211,7 +211,8 @@ def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = 
     fem, masc = s.get("sexo") == "FEMININO", s.get("sexo") == "MASCULINO"
     g = (lambda f, m, x: f if fem else m if masc else x)
     if docente is None:
-        docente = s.get("quadro") == "MAGISTÉRIO" or any(s.get(k) for k in ("tipo_ensino", "atuacao", "componente"))
+        docente = s.get("quadro") == "MAGISTÉRIO" or (
+            not s.get("quadro") and any(s.get(k) for k in ("tipo_ensino", "atuacao", "componente")))
     e = lambda v: f"<b>{escape(str(v))}</b>"
     cargo = s.get("funcao") or s.get("cargo") or "—"
     horas = s.get("horas_semanais") or s.get("carga_horaria")
