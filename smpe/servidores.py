@@ -123,33 +123,58 @@ def importar(con, recs: list[dict], arquivo: str) -> dict:
     return {"lidos": len(recs), "novos": novos, "atualizados": atualizados, "total": total}
 
 
-def carregar_turnos(con, recs: list[dict], lotacoes: set[str]) -> dict:
+def chave_lotacao(lotacao) -> str:
+    """Compara lotacoes sem pontuacao nem espacos ('U.E.B. PROF. SA VALLE' = 'UEB PROF SA VALLE')."""
+    return norm_nome(lotacao).replace(" ", "")
+
+
+def carregar_turnos(con, recs: list[dict], lotacoes: set[str], sem_lotacao: bool) -> dict:
     """Acao pontual: grava o turno informado no arquivo (aba CADASTRO) para os servidores das lotacoes indicadas
-    (nomes normalizados), substituindo o turno atual. Casa pela matricula, depois CPF, depois nome."""
+    (chave_lotacao), substituindo o turno atual. Casa pela matricula; sem matricula no cadastro, pelo CPF ou nome,
+    desde que o registro nao seja de outra matricula (outro vinculo da mesma pessoa). sem_lotacao (so RH/admin):
+    servidor ainda sem lotacao, achado pela matricula, recebe a lotacao do arquivo."""
     arquivo = {}  # o primeiro registro de cada servidor vale (o CADASTRO vem antes do GEDUC)
     for r in recs:
         d = limpa(r)
-        if d.get("nome") and d.get("turno") and norm_nome(d.get("lotacao")) in lotacoes:
+        if d.get("nome") and d.get("turno") and chave_lotacao(d.get("lotacao")) in lotacoes:
             arquivo.setdefault(d.get("matricula") or d.get("cpf") or norm_nome(d["nome"]), d)
-    atuais = [dict(r) for r in con.execute("SELECT id, nome, matricula, cpf, nome_norm, lotacao, turno FROM servidores")]
-    atuais = [s for s in atuais if not s["lotacao"] or norm_nome(s["lotacao"]) in lotacoes]
-    por = {}
-    for k in ("nome_norm", "cpf", "matricula"):  # a ultima chave tem prioridade
-        por.update({(k, s[k]): s for s in atuais if s[k]})
-    atualizados, iguais, nao_achados = 0, 0, []
-    with con:
-        for d in arquivo.values():
-            s = next((por[(k, v)] for k, v in (("matricula", d.get("matricula")), ("cpf", d.get("cpf")),
-                                                ("nome_norm", norm_nome(d["nome"]))) if v and (k, v) in por), None)
+    todos = [dict(r) for r in con.execute("SELECT id, nome, matricula, cpf, nome_norm, lotacao, turno FROM servidores")]
+    da_inst = [s for s in todos if chave_lotacao(s["lotacao"]) in lotacoes]
+    pela_mat = da_inst + ([s for s in todos if not s["lotacao"]] if sem_lotacao else [])
+
+    usados = set()  # cada servidor do cadastro recebe o turno de uma linha so
+
+    def localiza(d: dict) -> dict | None:
+        mat = d.get("matricula")
+        if mat and (s := next((s for s in pela_mat if s["matricula"] == mat), None)):
+            return s
+        for k, v in (("cpf", d.get("cpf")), ("nome_norm", norm_nome(d["nome"]))):
+            s = next((s for s in da_inst if v and s[k] == v and s["id"] not in usados
+                      and not (mat and s["matricula"])), None)
+            if s:
+                return s
+        return None
+
+    atualizados, iguais, nao_achados, em_outra = 0, 0, [], []
+    with con:  # primeiro as linhas com matricula, para a busca por CPF/nome nao tomar o registro delas
+        for d in sorted(arquivo.values(), key=lambda d: not d.get("matricula")):
+            s = localiza(d)
+            if s and s["id"] in usados:
+                s = None
+            if s:
+                usados.add(s["id"])
             if not s:
-                nao_achados.append(d["nome"])
+                outro = any(x for x in todos if (d.get("matricula") and x["matricula"] == d["matricula"])
+                            or (d.get("cpf") and x["cpf"] == d["cpf"]))
+                (em_outra if outro else nao_achados).append(d["nome"])
             elif s["turno"] == d["turno"] and s["lotacao"]:
                 iguais += 1
             else:
                 con.execute(f"UPDATE servidores SET turno=?, lotacao=?, atualizado_em={_agora()} WHERE id=?",
                             (d["turno"], s["lotacao"] or d["lotacao"], s["id"]))
                 atualizados += 1
-    return {"no_arquivo": len(arquivo), "atualizados": atualizados, "iguais": iguais, "nao_encontrados": sorted(nao_achados)}
+    return {"no_arquivo": len(arquivo), "atualizados": atualizados, "iguais": iguais,
+            "nao_encontrados": sorted(nao_achados), "outra_lotacao": sorted(em_outra)}
 
 
 ABAS_SGI = ("CADASTRO", "GEDUC")  # a planilha SGI Servidor tem as duas: le o CADASTRO e completa com o GEDUC

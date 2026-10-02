@@ -1330,10 +1330,11 @@ function ligarFiltros(box, st, render) {
 }
 function filtrar(lista, st) {
   const q = (st.q || "").toUpperCase(), qd = q.replace(/\D/g, "");
-  return lista.filter(s => FILTRO_SRV.every(([k]) => !st[k] || s[k] === st[k]) &&
+  // a instituicao nao tem a caixa Instituicao: ignora o que sobrou de um login anterior do RH na mesma aba
+  return lista.filter(s => FILTRO_SRV.every(([k]) => !st[k] || (k === "lotacao" && SRV.instituicao) || s[k] === st[k]) &&
     (!q || s.nome.includes(q) || (qd && (s.matricula.includes(qd) || s.cpf.includes(qd)))));
 }
-const filtroTxt = st => [st.q && `Busca: ${st.q}`, ...FILTRO_SRV.map(([k]) => st[k])].filter(Boolean).join(" · ");
+const filtroTxt = st => [st.q && `Busca: ${st.q}`, ...FILTRO_SRV.map(([k]) => k === "lotacao" && SRV.instituicao ? SRV.instituicao : st[k])].filter(Boolean).join(" · ");
 const pendSrv = s => [!s.lotacao && "sem lotação", !s.turno && "sem turno", !s.quadro && "sem quadro", !s.matricula && "sem matrícula", !s.dt_nasc && "sem nascimento"].filter(Boolean);
 
 const ST_SRV = {status: "ATIVO"};
@@ -1383,14 +1384,15 @@ async function servidores() {
   };
   $("#turnosArq").onchange = async ev => {
     const f = ev.target.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append("arquivo", f); fd.append("lotacao", ST_SRV.lotacao || "");
+    const fd = new FormData(); fd.append("arquivo", f); fd.append("lotacao", SRV.instituicao ? "" : ST_SRV.lotacao || "");
     const b = $("#turnosSrv"); b.disabled = true; b.textContent = "Carregando turnos…";
     try {
       const r = await api("/api/servidores/turnos", {method: "POST", body: fd});
       await servidores();
       modal(`<div class="mh"><h2>Turnos carregados</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
         <div class="mb"><p><b>${fmtN(r.atualizados)}</b> servidor(es) com o turno gravado e <b>${fmtN(r.iguais)}</b> que já estavam com o turno da planilha, de ${fmtN(r.no_arquivo)} com turno na aba CADASTRO.</p>
-        ${r.nao_encontrados.length ? `<div class="alert warn">${fmtN(r.nao_encontrados.length)} da planilha não estão no cadastro (importe a planilha para incluí-los):<br>${r.nao_encontrados.map(esc).join("<br>")}</div>` : ""}</div>`);
+        ${r.nao_encontrados.length ? `<div class="alert warn">${fmtN(r.nao_encontrados.length)} da planilha não foram encontrados entre os servidores da instituição${SRV.instituicao ? " (peça ao RH para importar a planilha)" : " (importe a planilha para incluí-los)"}:<br>${r.nao_encontrados.map(esc).join("<br>")}</div>` : ""}
+        ${r.outra_lotacao.length ? `<div class="alert warn">${fmtN(r.outra_lotacao.length)} estão cadastrados com outra lotação ou outra matrícula e não foram alterados (confira a lotação no cadastro):<br>${r.outra_lotacao.map(esc).join("<br>")}</div>` : ""}</div>`);
     } catch { b.disabled = false; b.textContent = "Carregar turnos da planilha"; }
   };
   const row = s => `<tr class="click" data-id="${s.id}"><td><b>${esc(s.nome)}</b>${pendSrv(s).map(p => ` <span class="badge b-warn">${p}</span>`).join("")}<div class="muted">${esc(s.setor)}</div></td>
@@ -1438,6 +1440,8 @@ function declaracao(s) {
     const body = Object.fromEntries(new FormData(ev.target));
     await baixarPdf(`/api/servidores/${s.id}/declaracao`, body, ev.submitter);
     Object.assign(s, body); closeModal();
+    // gerada pela ficha aberta: atualiza os campos para o Salvar nao gravar os valores antigos
+    const fe = $("#fSrvEd"); if (fe) for (const [k, v] of Object.entries(body)) if (fe[k]) fe[k].value = v;
   };
 }
 const CAMPOS_SRV = [

@@ -187,11 +187,11 @@ def srv(u: dict = Depends(usuario)) -> dict:
         return {**u, "lotacoes": None}
     e = db.connect().execute("SELECT nome, geduc_nome FROM escolas WHERE id=?", (u["escola_id"],)).fetchone()
     nomes = [x for x in (e["geduc_nome"], e["nome"]) if x] if e else []
-    return {**u, "lotacoes": {norm_nome(x) for x in nomes}, "lotacao_padrao": nomes[0] if nomes else ""}
+    return {**u, "lotacoes": {servidores.chave_lotacao(x) for x in nomes}, "lotacao_padrao": nomes[0] if nomes else ""}
 
 
 def _no_escopo(u: dict, s) -> bool:
-    return u["lotacoes"] is None or norm_nome(s["lotacao"]) in u["lotacoes"]
+    return u["lotacoes"] is None or servidores.chave_lotacao(s["lotacao"]) in u["lotacoes"]
 
 
 def admin(u: dict = Depends(usuario)) -> dict:
@@ -1426,7 +1426,7 @@ class ServidorIn(BaseModel):
 
 def _servidor_vals(con, d: ServidorIn, sid: int | None, u: dict) -> dict:
     v = _limpo(d)
-    if u["lotacoes"] is not None and norm_nome(v["lotacao"]) not in u["lotacoes"]:
+    if u["lotacoes"] is not None and servidores.chave_lotacao(v["lotacao"]) not in u["lotacoes"]:
         v["lotacao"] = u["lotacao_padrao"]  # a instituicao cadastra e edita so servidores lotados nela
     for k in ("dt_nasc", "dt_admissao"):
         v[k] = _data_iso(v[k], "Data de nascimento" if k == "dt_nasc" else "Data de admissão")
@@ -1438,16 +1438,17 @@ def _servidor_vals(con, d: ServidorIn, sid: int | None, u: dict) -> dict:
     v["status"] = v["status"] or "ATIVO"
     if v["matricula"]:
         outro = con.execute("SELECT id, nome FROM servidores WHERE matricula=?", (v["matricula"],)).fetchone()
-        if outro and outro["id"] != sid:
-            raise HTTPException(400, f"A matrícula {v['matricula']} já é de {outro['nome']}")
+        if outro and outro["id"] != sid:  # a instituicao nao fica sabendo quem e de outra instituicao
+            dono = outro["nome"] if u["lotacoes"] is None or _no_escopo(u, _servidor(con, outro["id"], None))                 else "um servidor de outra instituição"
+            raise HTTPException(400, f"A matrícula {v['matricula']} já é de {dono}")
     return v
 
 
-def _servidor(con, sid: int, u: dict) -> dict:
+def _servidor(con, sid: int, u: dict | None) -> dict:
     r = con.execute("SELECT * FROM servidores WHERE id=?", (sid,)).fetchone()
     if not r:
         raise HTTPException(404, "Servidor não encontrado")
-    if not _no_escopo(u, r):
+    if u and not _no_escopo(u, r):
         raise HTTPException(403, "Servidor de outra instituição")
     return dict(r)
 
@@ -1527,7 +1528,14 @@ async def importar_servidores(arquivo: UploadFile = File(...), u: dict = Depends
 async def carregar_turnos(arquivo: UploadFile = File(...), lotacao: str = Form(""), u: dict = Depends(srv)):
     """Acao pontual: grava o turno da aba CADASTRO (planilha SGI Servidor) nos servidores de uma instituicao.
     A instituicao carrega so a propria; o RH e o administrador escolhem a lotacao no filtro."""
-    lotacoes = u["lotacoes"] if u["lotacoes"] is not None else {norm_nome(lotacao)} - {""}
+    con = db.connect()
+    lotacoes = u["lotacoes"]
+    if lotacoes is None:  # a lotacao do filtro e os outros nomes da mesma instituicao (cadastro e GEDUC)
+        lotacoes = {servidores.chave_lotacao(lotacao)} - {""}
+        for e in con.execute("SELECT nome, geduc_nome FROM escolas"):
+            nomes = {servidores.chave_lotacao(x) for x in (e["nome"], e["geduc_nome"]) if x}
+            if nomes & lotacoes:
+                lotacoes |= nomes
     if not lotacoes:
         raise HTTPException(400, "Escolha a instituição no filtro antes de carregar os turnos")
     data = await arquivo.read()
@@ -1535,7 +1543,7 @@ async def carregar_turnos(arquivo: UploadFile = File(...), lotacao: str = Form("
         recs, _ = servidores.ler_arquivo(arquivo.filename or "arquivo", data)
     except ValueError as ex:
         raise HTTPException(400, str(ex))
-    out = servidores.carregar_turnos(db.connect(), recs, lotacoes)
+    out = servidores.carregar_turnos(con, recs, lotacoes, sem_lotacao=u["lotacoes"] is None)
     if not out["no_arquivo"]:
         raise HTTPException(400, "O arquivo não tem servidores dessa instituição com turno informado")
     return out
@@ -1579,11 +1587,11 @@ def pdf_frequencia(f: FrequenciaIn, u: dict = Depends(srv)):
 
 def _escola_da_lotacao(con, lotacao: str) -> dict | None:
     """Instituicao cadastrada com o mesmo nome da lotacao (ou com esse nome no GEDUC), para o cabecalho da declaracao."""
-    alvo = norm_nome(lotacao)
+    alvo = servidores.chave_lotacao(lotacao)
     if not alvo:
         return None
     for e in con.execute("SELECT * FROM escolas"):
-        if alvo in (norm_nome(e["nome"]), norm_nome(e["geduc_nome"])):
+        if alvo in (servidores.chave_lotacao(e["nome"]), servidores.chave_lotacao(e["geduc_nome"])):
             reps = list(con.execute("SELECT nome, cargo, funcao_ficha FROM representantes WHERE escola_id=? ORDER BY id",
                                     (e["id"],)))
             dir_ = next((r for r in reps if r["funcao_ficha"] == "diretor"), None) or \
