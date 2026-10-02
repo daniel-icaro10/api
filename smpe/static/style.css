@@ -20,6 +20,8 @@ svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-widt
 nav{display:flex;flex-direction:column;padding:14px 12px;gap:3px}
 .nav-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 12px 6px}
 nav a{color:var(--ink-2);padding:10px 12px;border-radius:10px;display:flex;gap:12px;align-items:center;font-weight:500;position:relative;transition:background .15s,color .15s}
+nav a.sub{padding:7px 12px 7px 34px;font-size:13px}
+nav a.sub .i{width:16px;height:16px}
 nav a:hover{background:var(--soft);color:var(--blue);text-decoration:none}
 nav a.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
 nav a.active::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--blue)}

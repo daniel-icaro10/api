@@ -212,21 +212,23 @@ const ultimaEscola = () => {
 
 // ------------------------------------------------------------------ roteador
 const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config, usuarios,
-  servidores, frequencia, aniversariantes, feriados};
+  servidores, frequencia, aniversariantes, feriados, decl_professor: () => declaracoes("professor"),
+  decl_administrativo: () => declaracoes("administrativo")};
 const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config", "usuarios"]);
-const DO_RH = new Set(["servidores", "frequencia", "aniversariantes", "feriados"]);  // perfil RH (e o administrador)
+const DO_RH = new Set(["servidores", "decl_professor", "decl_administrativo", "frequencia", "aniversariantes", "feriados"]);  // perfil RH (e o administrador)
 const SO_RH = new Set(["feriados"]);  // a instituicao usa o resto do modulo, so com os servidores dela
-const TITLES = {painel: "Painel", migracao: "Matriculado", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
+const TITLES = {painel: "Painel", migracao: "Matriculados", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
   relatorios: "Relatórios", orcamento: "Orçamento", bases: "Bases e importação", busca: "Localizar estudante", config: "Configurações",
   usuarios: "Usuários", servidores: "Servidores", frequencia: "Folha de frequência", aniversariantes: "Aniversariantes do mês",
-  feriados: "Feriados e pontos facultativos"};
+  feriados: "Feriados e pontos facultativos", decl_professor: "Declaração (Professor)", decl_administrativo: "Declaração (Administrativo)"};
 const CRUMBS = {painel: "Visão geral da migração nas instituições", migracao: "Alunos matriculados · cruzamento de CPF GEDUC × Censo × SMTT × Status",
   escolas: "Instituições de ensino, acesso e vínculo com o GEDUC", remessas: "Arquivos enviados ao banco de dados da SMTT", critica: "Mesmas regras do validador oficial SMPE (AlunoCritica)",
   relatorios: "Listas para conferência e preenchimento pela instituição", orcamento: "Valores por instituição (somente alunos com CPF)",
   bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte e orçamento",
   usuarios: "Logins, perfis e instituições vinculadas", servidores: "Cadastro dos servidores da SEMED (base GEDUC + RH)",
   frequencia: "Registro individual de frequência por mês", aniversariantes: "Lista e etiquetas dos aniversariantes",
-  feriados: "Datas marcadas em vermelho na folha de frequência"};
+  feriados: "Datas marcadas em vermelho na folha de frequência",
+  decl_professor: "Efetivo exercício · quadro Magistério", decl_administrativo: "Efetivo exercício · técnico/administrativo e terceirizados"};
 async function router() {
   if (!SESSAO) return;
   const [path, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
@@ -944,7 +946,7 @@ async function remessas(_, qs) {
   const eid = qs.get("escola") || "";
   const ls = await api("/api/lotes" + (eid ? "?escola_id=" + eid : ""));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>Remessas geradas</h2><span class="spacer"></span>${ls.length ? btnXls("remessas") : ""}<div style="width:360px" data-admin>${escolaSelect("selEscR", eid)}</div></div>
-    ${ls.length ? `<div class="table-wrap" style="max-height:none"><table id="tbL"><thead><tr><th>#</th><th>Instituição</th><th>Gerada em</th><th class="num">Alunos</th><th>Arquivo</th><th></th></tr></thead><tbody id="tbLBody"></tbody></table></div><div id="pgL"></div>` : `<div class="empty">Nenhuma remessa gerada. Selecione alunos em <a href="#/migracao">Matriculado</a> e clique em “Gerar remessa SMTT”.</div>`}</div>
+    ${ls.length ? `<div class="table-wrap" style="max-height:none"><table id="tbL"><thead><tr><th>#</th><th>Instituição</th><th>Gerada em</th><th class="num">Alunos</th><th>Arquivo</th><th></th></tr></thead><tbody id="tbLBody"></tbody></table></div><div id="pgL"></div>` : `<div class="empty">Nenhuma remessa gerada. Selecione alunos em <a href="#/migracao">Matriculados</a> e clique em “Gerar remessa SMTT”.</div>`}</div>
     <div class="card" style="margin-top:16px"><div class="card-h"><h2>Arquivo do processamento final</h2><span class="spacer"></span>
       <span class="muted">TXT do processamento final + PDF com os CPFs dos alunos (os dois são obrigatórios)</span><span id="xlsFinais"></span></div>
       <div class="card-b"><form id="fFinal" class="row" style="align-items:flex-end">
@@ -1320,10 +1322,13 @@ async function baixarPdf(url, body, botao) {
 const opts = (lista, sel, vazio = "") => `${vazio ? `<option value="">${vazio}</option>` : ""}${lista.map(v => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
 // filtros comuns das telas do RH: busca, lotacao, quadro, turno, setor e status
 const FILTRO_SRV = [["lotacao", "Todas as instituições"], ["quadro", "Todos os quadros"], ["turno", "Todos os turnos"], ["setor", "Todos os setores"], ["status", "Todos os status"]];
-function filtrosSrv(st) {
-  return `<input data-f="q" placeholder="Nome, matrícula ou CPF…" value="${esc(st.q || "")}" style="max-width:240px">` +
+const ROTULO_SRV = {q: "Buscar", lotacao: "Instituição", quadro: "Quadro", turno: "Turno", setor: "Setor", status: "Status"};
+// rotulado: cada filtro com o nome em cima (Aniversariantes e Declaracoes)
+function filtrosSrv(st, rotulado = false) {
+  const r = (k, ctl) => rotulado ? `<div><label>${ROTULO_SRV[k]}</label>${ctl}</div>` : ctl;
+  return r("q", `<input data-f="q" placeholder="Nome, matrícula ou CPF…" value="${esc(st.q || "")}" style="max-width:240px">`) +
     FILTRO_SRV.filter(([k]) => k !== "lotacao" || !SRV.instituicao).map(([k, l]) =>
-      `<select data-f="${k}" style="max-width:${k === "lotacao" ? 300 : 220}px" title="${k === "lotacao" ? "Instituição" : ""}">${opts(SRV.opcoes[k], st[k], l)}</select>`).join("");
+      r(k, `<select data-f="${k}" style="max-width:${k === "lotacao" ? 300 : 220}px" title="${k === "lotacao" ? "Instituição" : ""}">${opts(SRV.opcoes[k], st[k], l)}</select>`)).join("");
 }
 function ligarFiltros(box, st, render) {
   $$("[data-f]", box).forEach(el => el[el.tagName === "INPUT" ? "oninput" : "onchange"] = () => { st[el.dataset.f] = el.value.trim(); render(); });
@@ -1425,21 +1430,34 @@ async function servidores() {
     const tr = ev.target.closest("tr[data-id]"); if (tr) editarServidor(l.find(s => s.id === +tr.dataset.id));
   };
 }
-// declaracao: como na aba DECLARACAO, pede tipo de ensino, atuacao e disciplina(s) (ja vem o que esta no cadastro)
-function declaracao(s) {
+// declaracao: modelo Professor (como a aba DECLARACAO: pede tipo de ensino, atuacao e disciplina(s), ja com o que
+// esta no cadastro) ou Administrativo. modelo fixo nas telas do submenu; na lista de servidores, sugerido pelo quadro.
+const MODELO_DECL = s => s.quadro === "MAGISTÉRIO" || (!s.quadro && (s.tipo_ensino || s.atuacao || s.componente)) ? "professor" : "administrativo";
+function declaracao(s, fixo = "", depois = null) {
+  const modelo = fixo || MODELO_DECL(s);
   const lista = (k, v) => `<select name="${k}">${opts([...new Set([...SRV.opcoes[k], v].filter(Boolean))], v, "—")}</select>`;
-  modal(`<div class="mh"><h2>Declaração</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
-    <form class="mb form" id="fDecl"><div class="full"><b>${esc(s.nome)}</b><div class="muted">Matrícula ${esc(s.matricula) || "—"} · ${esc(s.lotacao) || "sem lotação"} · ${esc(s.turno) || "sem turno"}</div></div>
-      <div class="full"><label>Tipo de ensino</label>${lista("tipo_ensino", s.tipo_ensino)}</div>
-      <div class="full"><label>Atuação</label>${lista("atuacao", s.atuacao)}</div>
-      <div class="full"><label>Disciplina(s)</label><input name="componente" value="${esc(s.componente)}" placeholder="Ex.: História/Geografia"></div>
-      <div class="full muted">Ficam gravados no cadastro do servidor. Para quem não é docente, deixe em branco.</div>
+  modal(`<div class="mh"><h2>Declaração${fixo ? ` (${fixo === "professor" ? "Professor" : "Administrativo"})` : ""}</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form class="mb form" id="fDecl"><div class="full"><b>${esc(s.nome)}</b><div class="muted">Matrícula ${esc(s.matricula) || "—"} · ${esc(s.funcao || s.cargo) || "sem cargo"} · ${esc(s.lotacao) || "sem lotação"} · ${esc(s.turno) || "sem turno"}</div></div>
+      ${fixo ? `<input type="hidden" name="modelo" value="${fixo}">` : `<div class="full"><label>Modelo</label><select name="modelo">
+        <option value="professor" ${modelo === "professor" ? "selected" : ""}>Professor</option>
+        <option value="administrativo" ${modelo === "administrativo" ? "selected" : ""}>Administrativo</option></select></div>`}
+      <div class="full form" id="declDoc" style="padding:0">
+        <div class="full"><label>Tipo de ensino</label>${lista("tipo_ensino", s.tipo_ensino)}</div>
+        <div class="full"><label>Atuação</label>${lista("atuacao", s.atuacao)}</div>
+        <div class="full"><label>Disciplina(s)</label><input name="componente" value="${esc(s.componente)}" placeholder="Ex.: História/Geografia"></div>
+        <div class="full muted">Ficam gravados no cadastro do servidor.</div></div>
       <div class="full row"><span class="spacer"></span><button class="primary">${icDl}Gerar declaração</button></div></form>`);
-  $("#fDecl").onsubmit = async ev => {
+  const f = $("#fDecl"), prof = () => f.modelo.value === "professor";
+  const upd = () => { $("#declDoc").hidden = !prof(); };
+  if (f.modelo.tagName === "SELECT") f.modelo.onchange = upd;
+  upd();
+  f.onsubmit = async ev => {
     ev.preventDefault();
-    const body = Object.fromEntries(new FormData(ev.target));
+    const body = Object.fromEntries(new FormData(f));
     await baixarPdf(`/api/servidores/${s.id}/declaracao`, body, ev.submitter);
-    Object.assign(s, body); closeModal();
+    closeModal();
+    if (!prof()) return depois?.();
+    delete body.modelo; Object.assign(s, body); depois?.();
     // gerada pela ficha aberta: atualiza os campos para o Salvar nao gravar os valores antigos
     const fe = $("#fSrvEd"); if (fe) for (const [k, v] of Object.entries(body)) if (fe[k]) fe[k].value = v;
   };
@@ -1494,6 +1512,35 @@ function editarServidor(s) {
   };
 }
 
+const ST_DECL = {professor: {status: "ATIVO"}, administrativo: {status: "ATIVO"}};
+async function declaracoes(modelo) {
+  await loadServidores();
+  const st = ST_DECL[modelo], prof = modelo === "professor";
+  $("#view").innerHTML = `<div class="card"><div class="card-h" id="fDec" style="align-items:flex-end">${filtrosSrv(st, true)}</div>
+    <div class="card-h"><span class="muted" id="nDec"></span></div>
+    <div class="table-wrap" style="max-height:none"><table id="tbD"><thead><tr><th>Servidor</th><th>Matrícula</th><th>Cargo / função</th><th>Lotação</th><th>Turno</th>
+      ${prof ? "<th>Tipo de ensino · atuação · disciplina(s)</th>" : "<th>Quadro</th>"}<th></th></tr></thead><tbody id="tbDBody"></tbody></table></div><div id="pgD"></div>
+    <div class="card-b muted">${prof ? "Servidores do quadro Magistério. Ao gerar, informe o tipo de ensino, a atuação e as disciplinas (ficam gravados no cadastro)."
+      : "Servidores dos quadros técnico/administrativo e terceirizado (e quem está sem quadro). O modelo do administrativo será ajustado conforme o enviado pela SEMED."}</div></div>`;
+  const lista = () => filtrar(SRV.servidores, st).filter(s => (MODELO_DECL(s) === "professor") === prof);
+  const row = s => `<tr><td><b>${esc(s.nome)}</b></td><td class="mono">${esc(s.matricula) || "—"}</td><td>${esc(s.funcao || s.cargo)}</td>
+    <td>${esc(s.lotacao) || "—"}</td><td>${esc(s.turno) || `<span class="badge b-warn">sem turno</span>`}</td>
+    <td>${prof ? [s.tipo_ensino, s.atuacao, s.componente].filter(Boolean).map(esc).join(" · ") || `<span class="badge b-warn">a informar</span>` : esc(s.quadro) || "—"}</td>
+    <td class="acoes"><button class="btn-dl btn-sm" data-decl="${s.id}">${icDl}Declaração</button></td></tr>`;
+  const render = () => {
+    const l = lista(), pg = paginar("decl_" + modelo, l, render);
+    $("#nDec").textContent = `${fmtN(l.length)} servidor(es)` + (filtroTxt(st) ? ` · ${filtroTxt(st)}` : "");
+    $("#tbDBody").innerHTML = pg.itens.map(row).join("") || `<tr><td colspan="7" class="empty">Nenhum servidor no filtro.</td></tr>`;
+    $("#pgD").innerHTML = pg.html;
+  };
+  ligarFiltros($("#fDec"), st, () => { resetPag("decl_" + modelo); render(); });
+  $("#tbD").onclick = ev => {
+    const b = ev.target.closest("[data-decl]");
+    if (b) declaracao(SRV.servidores.find(s => s.id === +b.dataset.decl), modelo, render);
+  };
+  render();
+}
+
 const ST_FREQ = {status: "ATIVO", mes: new Date().getMonth() + 1, ano: new Date().getFullYear()};
 async function frequencia() {
   await loadServidores();
@@ -1540,9 +1587,9 @@ const ST_ANIV = {status: "ATIVO", mes: new Date().getMonth() + 1};
 async function aniversariantes() {
   await loadServidores();
   const st = ST_ANIV, hoje = new Date();
-  $("#view").innerHTML = `<div class="card"><div class="card-h" id="fAniv">
-      <select id="aMes" style="max-width:160px">${MESES.map((m, i) => `<option value="${i + 1}" ${i + 1 === st.mes ? "selected" : ""}>${m}</option>`).join("")}</select>
-      ${filtrosSrv(st)}</div>
+  $("#view").innerHTML = `<div class="card"><div class="card-h" id="fAniv" style="align-items:flex-end">
+      <div><label>Mês</label><select id="aMes" style="max-width:160px">${MESES.map((m, i) => `<option value="${i + 1}" ${i + 1 === st.mes ? "selected" : ""}>${m}</option>`).join("")}</select></div>
+      ${filtrosSrv(st, true)}</div>
     <div class="card-h"><span class="muted" id="nAniv"></span><span class="spacer"></span>
       <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="13" value="0" style="width:64px"> etiqueta(s)</label>
       <label class="row" style="margin:0;gap:6px"><input type="checkbox" id="aGuias" style="width:auto">contorno (papel comum)</label>
@@ -1553,13 +1600,15 @@ async function aniversariantes() {
   const abrev = n => { const out = []; for (const p of n.split(/\s+/)) { out.push(p); if (out.filter(x => !["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x)).length === 2) break; }
     return out.map(x => ["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x) ? x.toLowerCase() : x[0] + x.slice(1).toLowerCase()).join(" "); };
   const idade = d => hoje.getFullYear() - +d.slice(0, 4);
+  const filtroAniv = () => [`Mês: ${MESES[st.mes - 1]}`, filtroTxt(st)].filter(Boolean).join(" · ");
   const lista = () => filtrar(SRV.servidores, st).filter(s => +s.dt_nasc.slice(5, 7) === st.mes).sort((a, b) => a.dt_nasc.slice(8, 10).localeCompare(b.dt_nasc.slice(8, 10)) || a.nome.localeCompare(b.nome));
-  XLS.aniv = () => ({titulo: `Aniversariantes de ${MESES[st.mes - 1]}`, subtitulo: filtroTxt(st),
+  XLS.aniv = () => ({titulo: `Aniversariantes de ${MESES[st.mes - 1]}`, subtitulo: filtroAniv(),
     colunas: [["Dia", "numero"], ["Servidor"], ["Na etiqueta"], ["Cargo"], ["Função"], ["Lotação"], ["Nascimento", "data"], ["Idade que completa", "numero"]],
     linhas: lista().map(s => [+s.dt_nasc.slice(8, 10), s.nome, abrev(s.nome), s.cargo, s.funcao, s.lotacao, s.dt_nasc, idade(s.dt_nasc)])});
   const render = () => {
     const l = lista();
-    $("#nAniv").textContent = `${fmtN(l.length)} aniversariante(s) em ${MESES[st.mes - 1].toLowerCase()}`;
+    $("#nAniv").textContent = `${fmtN(l.length)} aniversariante(s) em ${MESES[st.mes - 1].toLowerCase()}` +
+      (filtroTxt(st) ? ` · ${filtroTxt(st)}` : "");
     $("#tbA").innerHTML = l.map(s => `<tr><td><b>${s.dt_nasc.slice(8, 10)}/${s.dt_nasc.slice(5, 7)}</b></td><td>${esc(s.nome)}</td><td>${esc(abrev(s.nome))}</td>
       <td>${esc(s.funcao || s.cargo)}</td><td>${esc(s.lotacao)}</td><td class="num">${idade(s.dt_nasc)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Nenhum aniversariante no filtro.</td></tr>`;
   };

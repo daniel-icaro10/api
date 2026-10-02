@@ -193,12 +193,14 @@ def _endereco(escola: dict) -> str:
     return " - ".join(x for x in partes if x)
 
 
-def declaracao(s: dict, escola: dict | None, hoje: date) -> bytes:
-    """escola: instituicao cadastrada com o mesmo nome da lotacao (endereco, CEP, e-mail e INEP do cabecalho)."""
+def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = None) -> bytes:
+    """escola: instituicao cadastrada com o mesmo nome da lotacao (endereco, CEP, e-mail e INEP do cabecalho).
+    docente: modelo Professor (True) ou Administrativo (False); None decide pelo quadro e pelos dados de docencia."""
     escola = escola or {}
     fem, masc = s.get("sexo") == "FEMININO", s.get("sexo") == "MASCULINO"
     g = (lambda f, m, x: f if fem else m if masc else x)
-    docente = s.get("quadro") == "MAGISTÉRIO" or any(s.get(k) for k in ("tipo_ensino", "atuacao", "componente"))
+    if docente is None:
+        docente = s.get("quadro") == "MAGISTÉRIO" or any(s.get(k) for k in ("tipo_ensino", "atuacao", "componente"))
     e = lambda v: f"<b>{escape(str(v))}</b>"
     cargo = s.get("funcao") or s.get("cargo") or "—"
     horas = s.get("horas_semanais") or s.get("carga_horaria")

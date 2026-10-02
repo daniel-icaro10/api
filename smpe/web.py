@@ -1601,6 +1601,7 @@ def _escola_da_lotacao(con, lotacao: str) -> dict | None:
 
 
 class DeclaracaoIn(BaseModel):
+    modelo: str | None = ""  # professor | administrativo (sem modelo: decide pelos dados, como antes)
     tipo_ensino: str | None = ""
     atuacao: str | None = ""
     componente: str | None = ""
@@ -1608,16 +1609,22 @@ class DeclaracaoIn(BaseModel):
 
 @app.post("/api/servidores/{sid}/declaracao")
 def pdf_declaracao(sid: int, d: DeclaracaoIn, u: dict = Depends(srv)):
-    """Tipo de ensino, atuacao e disciplina(s) informados na hora (como na aba DECLARACAO) ficam no cadastro."""
+    """Professor: tipo de ensino, atuacao e disciplina(s) informados na hora (como na aba DECLARACAO) ficam no
+    cadastro. Administrativo: sem a parte de docencia."""
     con = db.connect()
     s = _servidor(con, sid, u)
-    v = {k: servidores.normaliza(k, x) for k, x in _limpo(d).items()}
+    v = _limpo(d)
+    modelo = v.pop("modelo")
+    if modelo not in ("", "professor", "administrativo"):
+        raise HTTPException(400, "Modelo de declaração inválido")
+    v = {k: servidores.normaliza(k, x) for k, x in v.items()} if modelo != "administrativo" else {}
     if any((s[k] or "") != x for k, x in v.items()):
         with con:
             con.execute(f"UPDATE servidores SET {', '.join(f'{k}=?' for k in v)}, atualizado_em={servidores._agora()} "
                         "WHERE id=?", (*v.values(), sid))
         s.update(v)
-    conteudo = servidores_pdf.declaracao(s, _escola_da_lotacao(con, s["lotacao"]), datetime.now(pdf.SAO_LUIS).date())
+    conteudo = servidores_pdf.declaracao(s, _escola_da_lotacao(con, s["lotacao"]), datetime.now(pdf.SAO_LUIS).date(),
+                                         docente={"professor": True, "administrativo": False}.get(modelo))
     return _pdf(conteudo, f"DECLARACAO_{s['matricula'] or sid}_{sem_acento(s['nome'].split()[0])}.pdf")
 
 
