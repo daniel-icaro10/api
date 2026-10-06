@@ -101,6 +101,7 @@ INSERT OR IGNORE INTO config VALUES ('remessa_bom', '1');
 
 INSERT OR IGNORE INTO config VALUES ('whatsapp', '');
 INSERT OR IGNORE INTO config VALUES ('suporte_texto', '');
+INSERT OR IGNORE INTO config VALUES ('aviso_prazo_dias', '10');
 
 -- Acesso: perfil admin (tudo) ou instituicao (so as instituicoes vinculadas em usuario_escolas)
 CREATE TABLE IF NOT EXISTS usuarios (
@@ -196,7 +197,9 @@ COLUNAS_NOVAS = [("lotes", "num_remessa", "INTEGER"), ("escolas", "bloqueado", "
                                                        "municipio", "funcao_ficha", "responsabilidade")] + [
     ("escola_cursos", c, "TEXT DEFAULT ''") for c in ("tipo_ensino", "modalidade")] + [
     ("escolas", c, "TEXT DEFAULT ''") for c in ("cnpj", "email", "gestor_nome", "gestor_cpf", "gestor_contato",
-                                                "gestor_email")]
+                                                "gestor_email")] + [
+    # prazo de uso do sistema pela instituicao (AAAA-MM-DD; vazio = sem prazo)
+    ("escolas", c, "TEXT DEFAULT ''") for c in ("uso_inicio", "uso_fim")]
 
 
 

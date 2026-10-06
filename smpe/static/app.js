@@ -86,6 +86,7 @@ function modoLogin(modo, msg = "", tipo = "warn") {
   loginAviso(msg, tipo);
 }
 function mostrarLogin(msg = "") {
+  $("#avisoPrazo").hidden = true;
   SESSAO = null; ESCOLAS = []; limparFiltrosSrv();
   modoLogin(PUBLICO.precisa_setup ? "setup" : TOKEN_SENHA ? "redefinir" : "entrar", msg);
   closeDrawer(); if ($("#modal").open) closeModal();
@@ -126,6 +127,10 @@ function entrar() {
   $("#trocaEsc").innerHTML = escs.length > 1 ? `<div class="um-label">Trocar instituição</div>` + escs.map(e =>
     `<button class="um-esc ${e.id === SESSAO.escola_id ? "active" : ""}" data-esc="${e.id}">${esc(e.nome)}</button>`).join("") : "";
   $("#userPerfil").textContent += escs.length > 1 ? ` · ${escs.length} instituições` : "";
+  const av = SESSAO.aviso_prazo;
+  $("#avisoPrazo").hidden = !av;
+  if (av) $("#avisoPrazo").textContent = av.dias <= 1 ? `Hoje (${fmtData(av.fim)}) é o último dia de uso do sistema. Procure o suporte para renovar.`
+    : `Restam ${av.dias} dias para uso do sistema (até ${fmtData(av.fim)}). Procure o suporte para renovar.`;
   router();
 }
 $("#trocaEsc").onclick = async ev => {
@@ -723,7 +728,8 @@ async function previaRemessa(eid, ids) {
 // ------------------------------------------------------------------ escolas
 async function escolas() {
   await loadEscolas();
-  const pn = await api("/api/painel");
+  const [pn, cfg] = await Promise.all([api("/api/painel"), api("/api/config")]);
+  CFG_AVISO = parseInt(cfg.aviso_prazo_dias ?? "10", 10) || 0;
   const res = Object.fromEntries(pn.escolas.map(e => [e.id, e]));
   $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} instituições</h2><span class="spacer"></span>
       <input id="fE" placeholder="Filtrar…" style="width:220px">${btnXls("escolas")}<button class="primary" id="novaEsc">Nova instituição</button></div>
@@ -733,8 +739,9 @@ async function escolas() {
       <td>${e.geduc_nome ? esc(e.geduc_nome) : `<span class="muted">mesmo nome</span>`}</td>
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
       <td>${e.logins?.length ? e.logins.map(l => `<div>${esc(fmtLogin(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
-      <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : `<span class="badge b-ok">ativa</span>`}</td>
+      <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : prazoBadge(e)}</td>
       <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${e.id}">Editar</button><button class="btn-dl btn-sm" data-fi="${e.id}">${icDl}Fichas</button>
+        <button class="btn-sm" data-pz="${e.id}">Prazo de uso</button>
         <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
   const filtradas = () => { const q = $("#fE").value.toLowerCase(); return ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q); };
   XLS.escolas = () => ({titulo: "Instituições", subtitulo: $("#fE").value && `Filtro: ${$("#fE").value}`,
@@ -744,7 +751,7 @@ async function escolas() {
       res[e.id]?.matriculados || 0, (e.logins || []).map(fmtLogin).join("\n"),
       (e.representantes || []).map(r => [r.nome, r.cargo, r.contato, r.email].filter(Boolean).join(" · ")).join("\n"),
       (e.cursos || []).map(c => `${c.curso} (grau ${c.grau})`).join("\n"),
-      e.bloqueado ? "Bloqueada" + (e.motivo_bloqueio ? `: ${e.motivo_bloqueio}` : "") : "Ativa"])});
+      e.bloqueado ? "Bloqueada" + (e.motivo_bloqueio ? `: ${e.motivo_bloqueio}` : "") : prazoInfo(e).txt])});
   const renderE = () => {
     const pg = paginar("escolas", filtradas(), renderE);
     $("#tbEBody").innerHTML = pg.itens.map(rowE).join("") || `<tr><td colspan="9" class="empty">Nenhuma instituição encontrada.</td></tr>`;
@@ -758,7 +765,36 @@ async function escolas() {
     if (b.dataset.ed) editarEscola(+b.dataset.ed);
     if (b.dataset.fi) fichasModal(+b.dataset.fi);
     if (b.dataset.bl) bloqueioEscola(+b.dataset.bl);
+    if (b.dataset.pz) prazoEscola(+b.dataset.pz);
   };
+}
+// prazo de uso (AAAA-MM-DD; o ultimo dia vale ate 23:59 de Brasilia, conferido no servidor)
+const hojeBR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+function prazoInfo(e) {
+  const ini = e.uso_inicio || "", fim = e.uso_fim || "", hoje = hojeBR();
+  const periodo = ini || fim ? `${ini ? fmtData(ini) : "…"} a ${fim ? fmtData(fim) : "sem fim"}` : "";
+  if (ini && hoje < ini) return {cls: "b-info", txt: `a iniciar em ${fmtData(ini)}`, periodo};
+  if (fim && hoje > fim) return {cls: "b-err", txt: `prazo vencido em ${fmtData(fim)}`, periodo};
+  if (fim) {
+    const dias = Math.round((Date.parse(fim) - Date.parse(hoje)) / 864e5) + 1;
+    return {cls: dias <= CFG_AVISO ? "b-warn" : "b-ok", txt: dias <= 1 ? "último dia de uso" : `ativa · restam ${dias} dias`, periodo};
+  }
+  return {cls: "b-ok", txt: "ativa", periodo};
+}
+let CFG_AVISO = 10;
+const prazoBadge = e => { const p = prazoInfo(e); return `<span class="badge ${p.cls}">${p.txt}</span>${p.periodo ? `<div class="muted">${p.periodo}</div>` : ""}`; };
+function prazoEscola(id) {
+  const e = ESCOLAS.find(x => x.id === id);
+  modal(`<div class="mh"><h2>Prazo de uso</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
+    <form id="fPz"><div class="mb form">
+      <div class="full"><p class="muted" style="margin:0"><b>${esc(e.nome)}</b>: os usuários só entram no período abaixo. O último dia vale até 23:59 (horário de Brasília); depois disso o acesso a esta instituição é bloqueado automaticamente. Deixe em branco para não ter limite.</p></div>
+      <div><label>Início do uso</label><input type="date" name="uso_inicio" value="${esc(e.uso_inicio || "")}"></div>
+      <div><label>Fim do uso</label><input type="date" name="uso_fim" value="${esc(e.uso_fim || "")}"></div>
+      <div class="full"><p class="muted" style="margin:0">O aviso “Restam X dias para uso do sistema” aparece para a instituição nos últimos ${CFG_AVISO} dias (altere em Configurações).</p></div>
+    </div><div class="mf"><button type="button" id="pzLimpar">Sem prazo</button><span class="spacer"></span><button type="button" onclick="closeModal()">Cancelar</button><button class="primary">Salvar</button></div></form>`);
+  const salvar = async body => { await api(`/api/escolas/${id}/prazo`, {method: "PUT", body}); closeModal(); toast("Prazo de uso salvo"); escolas(); };
+  $("#fPz").onsubmit = ev => { ev.preventDefault(); salvar(Object.fromEntries(new FormData(ev.target))); };
+  $("#pzLimpar").onclick = () => salvar({uso_inicio: "", uso_fim: ""});
 }
 async function bloqueioEscola(id) {
   const e = ESCOLAS.find(x => x.id === id);
@@ -1258,6 +1294,10 @@ async function config(_, qs) {
       <div class="full"><label>WhatsApp do suporte (com DDD)</label><input name="whatsapp" value="${esc(cfg.whatsapp || "")}" placeholder="(98) 99999-9999"></div>
       <div class="full"><label>Texto da opção Suporte</label><textarea name="suporte_texto" rows="4" placeholder="Horário de atendimento, e-mail, telefone…">${esc(cfg.suporte_texto || "")}</textarea></div>
       <div class="full"><button class="primary">Salvar suporte</button></div></form></div>
+    <div class="card"><div class="card-h"><h2>Prazo de uso das instituições</h2></div><form id="fAviso" class="card-b row" style="align-items:flex-end">
+      <div><label>Mostrar “Restam X dias para uso do sistema” a partir de quantos dias antes do fim?</label><input name="aviso_prazo_dias" type="number" min="0" max="365" step="1" value="${esc(cfg.aviso_prazo_dias ?? "10")}" style="width:120px"></div>
+      <button class="primary">Salvar</button>
+      <p class="muted" style="margin:0;flex-basis:100%">O início e o fim do uso de cada instituição ficam em Instituições → Prazo de uso. Use 0 para não mostrar o aviso.</p></form></div>
     <div class="card"><div class="card-h"><h2>Orçamento</h2></div><form id="fPreco" class="card-b row" style="align-items:flex-end">
       <div><label>Valor unitário por aluno com CPF (R$)</label><input name="preco_unitario" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:180px"></div>
       <button class="primary">Salvar</button></form></div></div></div>
@@ -1299,6 +1339,11 @@ async function config(_, qs) {
     PUBLICO = await api("/api/publico"); aplicarPublico(); toast("Suporte salvo");
   };
   $("#fPreco").onsubmit = async ev => { ev.preventDefault(); await api("/api/config", {method: "PUT", body: Object.fromEntries(new FormData(ev.target))}); toast("Preço salvo"); };
+  $("#fAviso").onsubmit = async ev => {
+    ev.preventDefault(); const n = parseInt(ev.target.aviso_prazo_dias.value, 10);
+    if (!(n >= 0)) return toast("Informe um número de dias (0 ou mais)");
+    await api("/api/config", {method: "PUT", body: {aviso_prazo_dias: n}}); CFG_AVISO = n; toast("Aviso de prazo salvo");
+  };
 }
 
 // ------------------------------------------------------------------ usuarios (admin)

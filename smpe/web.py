@@ -11,7 +11,7 @@ import threading
 import time
 import traceback
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -135,9 +135,33 @@ def _bloqueio_msg(motivo: str) -> str:
     return "Acesso da instituição bloqueado" + (f": {motivo}" if motivo else "") + ". Procure o suporte."
 
 
+BRASILIA = timezone(timedelta(hours=-3))  # sem horario de verao desde 2019
+
+
+def _hoje() -> date:
+    return datetime.now(BRASILIA).date()
+
+
+def _fmt_br(iso: str) -> str:
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}"
+
+
+def _prazo(e) -> dict:
+    """Prazo de uso da instituicao: o ultimo dia vale ate 23:59 (Brasilia). dias = dias de uso que restam
+    contando hoje (1 = ultimo dia)."""
+    ini, fim, hoje = e["uso_inicio"] or "", e["uso_fim"] or "", _hoje().isoformat()
+    if ini and hoje < ini:
+        return {"situacao": "a_iniciar", "msg": f"Acesso da instituição liberado a partir de {_fmt_br(ini)}."}
+    if fim and hoje > fim:
+        return {"situacao": "vencida", "msg": f"Acesso da instituição encerrado: o prazo de uso do sistema terminou "
+                                              f"em {_fmt_br(fim)}. Procure o suporte."}
+    dias = (date.fromisoformat(fim) - _hoje()).days + 1 if fim else None
+    return {"situacao": "ativa", "dias": dias, "msg": ""}
+
+
 def _instituicoes(con, uid: int) -> list[dict]:
-    return [dict(r) for r in con.execute(
-        """SELECT e.id, e.nome, e.geduc_nome, e.bloqueado, e.motivo_bloqueio FROM usuario_escolas ue
+    return [{**dict(r), "prazo": _prazo(r)} for r in con.execute(
+        """SELECT e.id, e.nome, e.geduc_nome, e.bloqueado, e.motivo_bloqueio, e.uso_inicio, e.uso_fim FROM usuario_escolas ue
            JOIN escolas e ON e.id = ue.escola_id WHERE ue.usuario_id=? ORDER BY e.nome""", (uid,))]
 
 
@@ -145,12 +169,14 @@ def _escopo(insts: list[dict], preferida: int | None) -> dict:
     """Instituicao ativa do usuario (a preferida, se continuar liberada) e as que ele pode alternar."""
     if not insts:
         raise HTTPException(403, "Acesso sem instituição vinculada. Procure o administrador.")
-    livres = [e for e in insts if not e["bloqueado"]]
+    livres = [e for e in insts if not e["bloqueado"] and e["prazo"]["situacao"] == "ativa"]
     if not livres:
-        raise HTTPException(403, _bloqueio_msg(insts[0]["motivo_bloqueio"]))
+        e = insts[0]
+        raise HTTPException(403, _bloqueio_msg(e["motivo_bloqueio"]) if e["bloqueado"] else e["prazo"]["msg"])
     ativa = next((e for e in livres if e["id"] == preferida), livres[0])
     return {"escola_id": ativa["id"], "escola_nome": ativa["nome"], "escola_geduc": ativa["geduc_nome"] or "",
-            "escolas": [{"id": e["id"], "nome": e["nome"]} for e in livres]}
+            "escolas": [{"id": e["id"], "nome": e["nome"]} for e in livres],
+            "uso_fim": ativa["uso_fim"] or "", "dias_restantes": ativa["prazo"]["dias"]}
 
 
 def usuario(request: Request) -> dict:
@@ -218,8 +244,17 @@ def _checa_aluno(con, u: dict, id_aluno: str):
 
 
 def _sessao_json(u: dict) -> dict:
-    return {"login": u["login"], "perfil": u["perfil"], "escola_id": u.get("escola_id"),
-            "escola_nome": u.get("escola_nome") or "", "escolas": u.get("escolas") or []}
+    s = {"login": u["login"], "perfil": u["perfil"], "escola_id": u.get("escola_id"),
+         "escola_nome": u.get("escola_nome") or "", "escolas": u.get("escolas") or []}
+    dias = u.get("dias_restantes")
+    if dias is not None:  # aviso "Restam X dias" so dentro da janela definida nas Configuracoes
+        try:
+            janela = int(db.get_config(db.connect(), "aviso_prazo_dias", "10") or 0)
+        except ValueError:
+            janela = 10
+        if dias <= janela:
+            s["aviso_prazo"] = {"dias": dias, "fim": u["uso_fim"]}
+    return s
 
 
 class LoginIn(BaseModel):
@@ -301,8 +336,7 @@ def trocar_instituicao(t: TrocaIn, u: dict = Depends(usuario)):
     con = db.connect()
     with con:
         con.execute("UPDATE sessoes SET escola_id=? WHERE token=?", (t.escola_id, u["token"]))
-    return _sessao_json({**u, "escola_id": t.escola_id,
-                         "escola_nome": next(e["nome"] for e in u["escolas"] if e["id"] == t.escola_id)})
+    return _sessao_json({**u, **_escopo(_instituicoes(con, u["id"]), t.escola_id)})  # aviso de prazo da nova
 
 
 # ------------------------------------------------------------------ usuarios (cadastrados pelo administrador)
@@ -792,6 +826,24 @@ def excluir_escola(eid: int, u: dict = Depends(admin)):
         raise HTTPException(400, "Instituição possui remessas geradas; exclua as remessas antes")
     with con:
         con.execute("DELETE FROM escolas WHERE id=?", (eid,))
+    return {"ok": True}
+
+
+class PrazoIn(BaseModel):
+    uso_inicio: str = ""
+    uso_fim: str = ""
+
+
+@app.put("/api/escolas/{eid}/prazo")
+def prazo_uso(eid: int, p: PrazoIn, u: dict = Depends(admin)):
+    """Periodo de uso do sistema pela instituicao (datas vazias = sem limite)."""
+    con = db.connect()
+    _escola(con, eid)
+    ini, fim = _data_iso(p.uso_inicio.strip(), "Início do uso"), _data_iso(p.uso_fim.strip(), "Fim do uso")
+    if ini and fim and fim < ini:
+        raise HTTPException(400, "O fim do uso deve ser igual ou depois do início")
+    with con:  # sessoes abertas passam a respeitar o prazo na proxima requisicao (checagem em usuario())
+        con.execute("UPDATE escolas SET uso_inicio=?, uso_fim=? WHERE id=?", (ini, fim, eid))
     return {"ok": True}
 
 
