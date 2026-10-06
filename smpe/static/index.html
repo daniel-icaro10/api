@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SIS SMPE</title>
+<title>Sistema Integrado de Gestão</title>
 <link rel="icon" href="/static/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -34,19 +34,21 @@
 </svg>
 <div id="login" class="login" hidden>
   <form class="login-card" id="loginForm">
-    <img class="logo-img" src="/api/logo" alt="SIS SMPE - Migração de estudantes SMTT">
+    <img class="logo-img" src="/api/logo" alt="Sistema Integrado de Gestão">
     <h1 id="loginTitulo">Entrar</h1>
     <p class="muted" id="loginSub">Acesse com o seu e-mail e a sua senha.</p>
     <div class="alert warn" id="loginMsg" hidden></div>
-    <div><label>E-mail</label><input name="login" autocomplete="username" inputmode="email" placeholder="nome@exemplo.com" required></div>
-    <div><label>Senha</label><input name="senha" type="password" autocomplete="current-password" required></div>
+    <div id="loginEmail"><label>E-mail</label><input name="login" autocomplete="username" inputmode="email" placeholder="nome@exemplo.com" required></div>
+    <div id="loginSenha"><label id="loginSenhaLbl">Senha</label><input name="senha" type="password" autocomplete="current-password" required>
+      <a href="#" class="login-esq" id="esqueciLnk">Esqueci minha senha</a></div>
     <div id="loginConf" hidden><label>Confirme a senha</label><input name="senha2" type="password" autocomplete="new-password"></div>
     <button class="primary" id="loginBtn">Entrar</button>
+    <a href="#" class="login-voltar" id="voltarLnk" hidden>Voltar para o login</a>
     <div class="login-sup" id="loginSup"></div>
   </form>
 </div>
 <aside class="side">
-  <div class="brand"><img class="logo-img" src="/api/logo" alt="SIS SMPE - Migração de estudantes SMTT"></div>
+  <div class="brand"><img class="logo-img" src="/api/logo" alt="Sistema Integrado de Gestão"></div>
   <nav id="nav">
     <div class="nav-label" data-smpe>Visão geral</div>
     <a href="#/painel" data-r="painel" data-smpe><svg class="i"><use href="#i-painel"/></svg>Painel</a>
@@ -79,7 +81,7 @@
 <div class="main">
   <header class="top">
     <button class="icon-btn only-mobile" id="menuBtn" aria-label="Menu">☰</button>
-    <div><h1 id="title">Painel</h1><div class="crumb" id="crumb">SIS SMPE</div></div>
+    <div><h1 id="title">Painel</h1><div class="crumb" id="crumb">Sistema Integrado de Gestão</div></div>
     <form class="search" id="buscaForm" data-smpe><svg class="i"><use href="#i-busca"/></svg><input id="buscaInput" placeholder="Localizar estudante por nome ou CPF…" autocomplete="off"></form>
     <div class="user" id="userBox">
       <button class="user-btn" id="userBtn" aria-haspopup="true"><span class="user-av" id="userAv"></span>

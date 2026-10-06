@@ -1,4 +1,4 @@
-// SIS SMPE - telas (SPA sem dependencias)
+// Sistema Integrado de Gestao - telas (SPA sem dependencias)
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -62,23 +62,55 @@ const ehAdmin = () => SESSAO?.perfil === "admin";
 const ehRH = () => SESSAO?.perfil === "rh";
 const iniciais = n => (n || "?").split(/\s+/).filter(w => w.length > 2).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
 const waLink = n => `https://wa.me/${n.length <= 11 ? "55" + n : n}`;
+// modos da tela de login: entrar, setup (primeiro acesso), esqueci (pede o link) e redefinir (abriu o link do e-mail)
+let LOGIN_MODO = "entrar", TOKEN_SENHA = "";
+const LOGIN_TXT = {
+  entrar: ["Entrar", "Acesse com o seu e-mail e a sua senha.", "Entrar"],
+  setup: ["Primeiro acesso", "Informe o e-mail e crie a senha do administrador do sistema.", "Criar administrador"],
+  esqueci: ["Recuperar senha", "Informe o e-mail que você usa para entrar. Enviaremos um link para criar uma nova senha.", "Enviar link"],
+  redefinir: ["Criar nova senha", "Digite a nova senha (mínimo de 6 caracteres).", "Salvar nova senha"]};
+function loginAviso(msg, tipo = "warn") { $("#loginMsg").className = `alert ${tipo}`; $("#loginMsg").textContent = msg; $("#loginMsg").hidden = !msg; }
+function modoLogin(modo, msg = "", tipo = "warn") {
+  LOGIN_MODO = modo;
+  const [titulo, sub, botao] = LOGIN_TXT[modo], f = $("#loginForm");
+  $("#loginTitulo").textContent = titulo; $("#loginSub").textContent = sub; $("#loginBtn").textContent = botao;
+  const comEmail = modo !== "redefinir", comSenha = modo !== "esqueci", conf = modo === "setup" || modo === "redefinir";
+  $("#loginEmail").hidden = !comEmail; f.login.required = comEmail;
+  $("#loginSenha").hidden = !comSenha; f.senha.required = comSenha;
+  $("#loginConf").hidden = !conf; f.senha2.required = conf;
+  $("#loginSenhaLbl").textContent = modo === "redefinir" ? "Nova senha" : "Senha";
+  f.senha.autocomplete = conf ? "new-password" : "current-password";
+  $("#esqueciLnk").hidden = modo !== "entrar";
+  $("#voltarLnk").hidden = !(modo === "esqueci" || modo === "redefinir");
+  $("#loginBtn").disabled = false;
+  loginAviso(msg, tipo);
+}
 function mostrarLogin(msg = "") {
   SESSAO = null; ESCOLAS = []; limparFiltrosSrv();
-  const setup = !!PUBLICO.precisa_setup;
-  $("#loginTitulo").textContent = setup ? "Primeiro acesso" : "Entrar";
-  $("#loginSub").textContent = setup ? "Informe o e-mail e crie a senha do administrador do sistema." : "Acesse com o seu e-mail e a sua senha.";
-  $("#loginConf").hidden = !setup; $("#loginConf input").required = setup;
-  $("#loginBtn").textContent = setup ? "Criar administrador" : "Entrar";
-  $("#loginMsg").textContent = msg; $("#loginMsg").hidden = !msg;
+  modoLogin(PUBLICO.precisa_setup ? "setup" : TOKEN_SENHA ? "redefinir" : "entrar", msg);
   closeDrawer(); if ($("#modal").open) closeModal();
   $("#login").hidden = false;
 }
+$("#esqueciLnk").onclick = e => { e.preventDefault(); modoLogin("esqueci"); $("#loginForm").login.focus(); };
+$("#voltarLnk").onclick = e => { e.preventDefault(); TOKEN_SENHA = ""; $("#loginForm").reset(); modoLogin("entrar"); };
 $("#loginForm").onsubmit = async ev => {
   ev.preventDefault();
-  const f = Object.fromEntries(new FormData(ev.target)), erro = m => { $("#loginMsg").textContent = m; $("#loginMsg").hidden = false; };
-  if (PUBLICO.precisa_setup && f.senha !== f.senha2) return erro("As senhas não conferem.");
-  try { SESSAO = await api(PUBLICO.precisa_setup ? "/api/setup" : "/api/login", {method: "POST", body: {login: f.login, senha: f.senha}, semLogin: true}); }
-  catch (e) { return erro(e.message); }
+  const f = Object.fromEntries(new FormData(ev.target)), erro = m => loginAviso(m), btn = $("#loginBtn");
+  if ((LOGIN_MODO === "setup" || LOGIN_MODO === "redefinir") && f.senha !== f.senha2) return erro("As senhas não conferem.");
+  btn.disabled = true;
+  try {
+    if (LOGIN_MODO === "esqueci") {
+      await api("/api/senha/esqueci", {method: "POST", body: {login: f.login}, semLogin: true});
+      return modoLogin("entrar", `Se ${f.login.trim()} tiver acesso ao sistema, você vai receber em instantes um e-mail com o link para criar uma nova senha. Confira também a caixa de spam.`, "ok");
+    }
+    if (LOGIN_MODO === "redefinir") {
+      await api("/api/senha/redefinir", {method: "POST", body: {token: TOKEN_SENHA, nova: f.senha}, semLogin: true});
+      TOKEN_SENHA = ""; ev.target.reset();
+      return modoLogin("entrar", "Senha alterada. Entre com o seu e-mail e a nova senha.", "ok");
+    }
+    SESSAO = await api(LOGIN_MODO === "setup" ? "/api/setup" : "/api/login", {method: "POST", body: {login: f.login, senha: f.senha}, semLogin: true});
+  } catch (e) { return erro(e.message); }
+  finally { btn.disabled = false; }
   PUBLICO.precisa_setup = false; ev.target.reset(); entrar();
 };
 function entrar() {
@@ -111,7 +143,7 @@ function aplicarPublico() {
 function suporte() {
   const wa = PUBLICO.whatsapp, txt = PUBLICO.suporte_texto;
   modal(`<div class="mh"><h2>Suporte</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
-    <div class="mb"><p style="white-space:pre-line;margin-top:0">${esc(txt) || "Em caso de dúvidas ou problemas no sistema, entre em contato com a equipe responsável pelo SIS SMPE."}</p>
+    <div class="mb"><p style="white-space:pre-line;margin-top:0">${esc(txt) || "Em caso de dúvidas ou problemas no sistema, entre em contato com a equipe responsável pelo Sistema Integrado de Gestão."}</p>
       ${wa ? `<a class="btn primary" href="${waLink(wa)}" target="_blank" rel="noopener"><svg class="i"><use href="#i-whatsapp"/></svg>Falar pelo WhatsApp</a>` : ""}</div>`);
 }
 $("#supBtn").onclick = e => { e.preventDefault(); suporte(); };
@@ -151,7 +183,7 @@ const LEGENDA = {0: "Instituição deve ser informada e ser um número inteiro",
   8: "Matrícula deve ser informada", 9: "Data de nascimento válida com 8 dígitos", 10: "Endereço deve ser informado",
   11: "Bairro deve ser informado", 12: "Cidade deve ser informada", 13: "Nome do pai inválido", 14: "CPF é requerido",
   15: "CPF duplicado", 16: "CPF inválido", 17: "Quantidade de colunas diferente do layout (375)",
-  18: "Nome da mãe deve ter nome e sobrenome (regra do SIS SMPE)"};
+  18: "Nome da mãe deve ter nome e sobrenome (regra do sistema)"};
 const pendTxt = a => a.pendencias.map(k => k === "critica_smtt" ? `Crítica SMTT ${(a.criticas || []).map(x => `(${x})`).join("")}` : PEND[k][0]).join("; ");
 const codBadges = cs => (cs || []).map(k => `<span class="badge b-err" title="${esc(LEGENDA[k])}">(${k}) ${esc(LEGENDA[k])}</span>`).join("");
 const pendBadges = (p, crit) => p.map(k => k === "critica_smtt" && crit?.length
@@ -224,7 +256,7 @@ const TITLES = {painel: "Painel", migracao: "Matriculados", escolas: "Cadastro d
 const CRUMBS = {painel: "Visão geral da migração nas instituições", migracao: "Alunos matriculados · cruzamento de CPF GEDUC × Censo × SMTT × Status",
   escolas: "Instituições de ensino, acesso e vínculo com o GEDUC", remessas: "Arquivos enviados ao banco de dados da SMTT", critica: "Mesmas regras do validador oficial SMPE (AlunoCritica)",
   relatorios: "Listas para conferência e preenchimento pela instituição", orcamento: "Valores por instituição (somente alunos com CPF)",
-  bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte e orçamento",
+  bases: "Planilha SIS SMPE e bases de origem", busca: "Toda a rede municipal", config: "Identidade visual, suporte, orçamento e e-mail",
   usuarios: "Logins, perfis e instituições vinculadas", servidores: "Cadastro dos servidores da SEMED (base GEDUC + RH)",
   frequencia: "Registro individual de frequência por mês", aniversariantes: "Lista e etiquetas dos aniversariantes",
   feriados: "Datas marcadas em vermelho na folha de frequência",
@@ -239,7 +271,7 @@ async function router() {
   const fn = ROUTES[nome] || painel;
   $$("#nav a").forEach(a => a.classList.toggle("active", a.dataset.r === nome));
   $("#title").textContent = TITLES[nome] || "Painel";
-  $("#crumb").textContent = (nome === "busca" || DO_RH.has(nome)) && SESSAO.perfil === "instituicao" ? SESSAO.escola_nome : CRUMBS[nome] || "SIS SMPE";
+  $("#crumb").textContent = (nome === "busca" || DO_RH.has(nome)) && SESSAO.perfil === "instituicao" ? SESSAO.escola_nome : CRUMBS[nome] || "Sistema Integrado de Gestão";
   $(".side").classList.remove("open");
   closeDrawer();
   $("#view").innerHTML = `<div class="empty">Carregando…</div>`;
@@ -1210,9 +1242,12 @@ async function busca(_, qs) {
 }
 
 // ------------------------------------------------------------------ configuracoes (admin)
-async function config() {
-  const cfg = await api("/api/config");
-  $("#view").innerHTML = `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));align-items:start">
+async function config(_, qs) {
+  const cfg = await api("/api/config"), aba = qs?.get("aba") === "email" ? "email" : "geral";
+  $("#view").innerHTML = `<div class="tabs" style="margin-bottom:16px">${[["geral", "Geral"], ["email", "E-mail (SMTP)"]].map(([k, l]) =>
+      `<button class="tab ${k === aba ? "active" : ""}" data-aba="${k}">${l}</button>`).join("")}</div>
+    <div data-pane="geral" ${aba === "geral" ? "" : "hidden"}>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));align-items:start">
     <div class="card"><div class="card-h"><h2>Identidade visual</h2></div><div class="card-b">
       <div style="background:var(--soft);border:1px solid var(--line);border-radius:var(--radius-sm);padding:18px;text-align:center;margin-bottom:14px">
         <img class="logo-img" src="/api/logo?t=${Date.now()}" alt="Logo atual" style="max-width:240px;max-height:90px"></div>
@@ -1225,7 +1260,34 @@ async function config() {
       <div class="full"><button class="primary">Salvar suporte</button></div></form></div>
     <div class="card"><div class="card-h"><h2>Orçamento</h2></div><form id="fPreco" class="card-b row" style="align-items:flex-end">
       <div><label>Valor unitário por aluno com CPF (R$)</label><input name="preco_unitario" type="number" step="0.01" min="0" value="${esc(cfg.preco_unitario)}" style="width:180px"></div>
-      <button class="primary">Salvar</button></form></div></div>`;
+      <button class="primary">Salvar</button></form></div></div></div>
+    <div data-pane="email" ${aba === "email" ? "" : "hidden"}>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));align-items:start">
+    <div class="card"><div class="card-h"><h2>Servidor de e-mail (SMTP)</h2>
+      <span class="badge ${cfg.smtp_usuario && cfg.smtp_senha_definida ? "b-ok" : "b-mute"}" style="margin-left:auto">${cfg.smtp_usuario && cfg.smtp_senha_definida ? "configurado" : "não configurado"}</span></div>
+      <form id="fSmtp" class="card-b form">
+      <div><label>Servidor SMTP</label><input name="smtp_host" value="${esc(cfg.smtp_host || "")}" placeholder="smtp.gmail.com" required></div>
+      <div><label>Porta</label><select name="smtp_porta">${["587", "465"].map(p => `<option value="${p}" ${String(cfg.smtp_porta) === p ? "selected" : ""}>${p} (${p === "587" ? "STARTTLS" : "SSL"})</option>`).join("")}</select></div>
+      <div class="full"><label>E-mail do Gmail (remetente)</label><input name="smtp_usuario" type="email" value="${esc(cfg.smtp_usuario || "")}" placeholder="sistema@gmail.com" autocomplete="off"></div>
+      <div class="full"><label>Senha de app do Gmail</label><input name="smtp_senha" type="password" autocomplete="new-password"
+        placeholder="${cfg.smtp_senha_definida ? "•••••••• (guardada; deixe em branco para manter)" : "16 letras geradas pelo Google"}"></div>
+      <div class="full"><label>Nome do remetente</label><input name="smtp_remetente" value="${esc(cfg.smtp_remetente || "")}" placeholder="Sistema Integrado de Gestão"></div>
+      <div class="full"><button class="primary">Salvar e-mail</button></div></form></div>
+    <div class="card"><div class="card-h"><h2>Testar envio</h2></div><form id="fSmtpTeste" class="card-b form">
+      <div class="full"><label>Enviar um e-mail de teste para</label><input name="para" type="email" required value="${esc(SESSAO.login.includes("@") ? SESSAO.login : "")}"></div>
+      <div class="full"><button class="primary" id="smtpTesteBtn">Enviar teste</button></div>
+      <div class="full"><p class="muted" style="margin:0">O e-mail é usado na opção <b>Esqueci minha senha</b> da tela de login: o usuário recebe um link (válido por 60 minutos) para criar uma nova senha.</p>
+      <p class="muted" style="margin-bottom:0"><b>Como gerar a senha de app no Gmail:</b> entre na conta Google do remetente → Segurança → ative a Verificação em duas etapas → Senhas de app → crie uma senha (ex.: “Sistema”) e cole aqui as 16 letras. A senha normal da conta não funciona.</p></div></form></div></div></div>`;
+  $$(".tabs .tab").forEach(b => b.onclick = () => location.hash = b.dataset.aba === "geral" ? "#/config" : `#/config?aba=${b.dataset.aba}`);
+  $("#fSmtp").onsubmit = async ev => {
+    ev.preventDefault();
+    await api("/api/config", {method: "PUT", body: Object.fromEntries(new FormData(ev.target))}); toast("Configuração de e-mail salva"); config(_, qs);
+  };
+  $("#fSmtpTeste").onsubmit = async ev => {
+    ev.preventDefault(); const b = $("#smtpTesteBtn"); b.disabled = true;
+    try { await api("/api/config/smtp/teste", {method: "POST", body: {para: ev.target.para.value}}); toast("E-mail de teste enviado"); }
+    catch {} finally { b.disabled = false; }
+  };
   $("#fLogo").onsubmit = async ev => {
     ev.preventDefault();
     await api("/api/logo", {method: "PUT", body: new FormData(ev.target)}); toast("Logo atualizada"); refreshLogo(); ev.target.reset();
@@ -1671,6 +1733,9 @@ async function feriados(_, qs) {
 async function boot() {
   try { PUBLICO = await api("/api/publico"); } catch {}
   aplicarPublico();
+  // link do e-mail de recuperar senha: /?redefinir=TOKEN (tira o token da barra de endereco)
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("redefinir")) { TOKEN_SENHA = qs.get("redefinir"); history.replaceState(null, "", "/"); return mostrarLogin(); }
   if (PUBLICO.precisa_setup) return mostrarLogin();
   try { SESSAO = await api("/api/sessao"); } catch { return; }  // sem sessao: api() ja abriu o login
   entrar();

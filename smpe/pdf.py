@@ -11,7 +11,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from .critica import decodificar, parse_linha
-from .util import fmt_cpf
+from .util import NOME_SISTEMA, fmt_cpf
 
 SAO_LUIS = timezone(timedelta(hours=-3))  # sem horario de verao
 AZUL = HexColor("#1f3b73")
@@ -99,7 +99,7 @@ def gerar(lote: dict, cod_instituicao: str, logo: bytes | None, agora: datetime 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"{TITULO} - {lote['arquivo']}")
-    c.setAuthor("SIS SMPE")
+    c.setAuthor(NOME_SISTEMA)
     num = 0
     for p, itens in enumerate(paginas, 1):
         primeira = p == 1
@@ -151,7 +151,7 @@ def gerar(lote: dict, cod_instituicao: str, logo: bytes | None, agora: datetime 
         c.drawString(ESQ + stringWidth("NA PÁGINA / TOTAL: ", FONTE_N, 7), rodape_y - 20, f"{len(itens)} / {len(alunos)}")
         c.setFont(FONTE_N, 6.5)
         c.drawCentredString((ESQ + DIR) / 2, rodape_y - 20, codigo)
-        c.drawCentredString((ESQ + DIR) / 2, rodape_y - 29, f"SIS SMPE · {lote['arquivo']}")
+        c.drawCentredString((ESQ + DIR) / 2, rodape_y - 29, f"{NOME_SISTEMA} · {lote['arquivo']}")
         c.setFont(FONTE, 7)
         c.drawRightString(DIR, rodape_y - 20, f"PÁGINA: {p} de {len(paginas)}")
         c.showPage()

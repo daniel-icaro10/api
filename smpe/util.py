@@ -3,6 +3,8 @@ import re
 import unicodedata
 from datetime import date, datetime, timedelta
 
+NOME_SISTEMA = "Sistema Integrado de Gestão"
+
 
 def sem_acento(s: str) -> str:
     s = unicodedata.normalize("NFKD", s or "")

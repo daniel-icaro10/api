@@ -121,6 +121,13 @@ CREATE TABLE IF NOT EXISTS sessoes (
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
     expira REAL NOT NULL
 );
+-- Recuperar senha: link enviado por e-mail (guarda so o hash do token)
+CREATE TABLE IF NOT EXISTS senha_tokens (
+    token_hash TEXT PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    criado REAL NOT NULL,
+    expira REAL NOT NULL
+);
 
 -- Alunos cadastrados individualmente pela instituicao (fora do GEDUC); id_aluno = 'M' + id
 CREATE TABLE IF NOT EXISTS alunos_manuais (

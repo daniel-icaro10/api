@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from .util import fmt_cpf, sem_acento
+from .util import NOME_SISTEMA, fmt_cpf, sem_acento
 
 HORA_LOCAL = timezone(timedelta(hours=-3))  # Sao Luis (sem horario de verao)
 
@@ -67,7 +67,7 @@ def gerar(titulo: str, colunas: list[dict], linhas: list[list], subtitulo: str =
     # titulo e identificacao
     ws.cell(1, 1, titulo).font = Font(name=FONTE, size=14, bold=True, color=NAVY)
     agora = datetime.now(HORA_LOCAL)
-    info = " · ".join(x for x in ("SIS SMPE", subtitulo, f"Gerado em {agora:%d/%m/%Y %H:%M}"
+    info = " · ".join(x for x in (NOME_SISTEMA, subtitulo, f"Gerado em {agora:%d/%m/%Y %H:%M}"
                                   + (f" por {fmt_cpf(usuario) if usuario.isdigit() else usuario}" if usuario else "")) if x)
     ws.cell(2, 1, info).font = Font(name=FONTE, size=9, italic=True, color=CINZA)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n)

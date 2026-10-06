@@ -1,4 +1,4 @@
-"""API + telas do SIS SMPE."""
+"""API + telas do Sistema Integrado de Gestao."""
 import codecs
 import difflib
 import hashlib
@@ -19,8 +19,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import critica, db, exportar, fichas, importer, logic, pdf, servidores, servidores_pdf
-from .util import chave_nome, cpf_valido, norm_cpf, norm_nome, sem_acento, so_digitos
+from . import correio, critica, db, exportar, fichas, importer, logic, pdf, servidores, servidores_pdf
+from .util import NOME_SISTEMA, chave_nome, cpf_valido, norm_cpf, norm_nome, sem_acento, so_digitos
 
 @asynccontextmanager
 async def _ciclo(_app):
@@ -28,7 +28,7 @@ async def _ciclo(_app):
     yield
 
 
-app = FastAPI(title="SIS SMPE", lifespan=_ciclo)
+app = FastAPI(title=NOME_SISTEMA, lifespan=_ciclo)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _import = {"rodando": False, "msg": [], "erro": None, "base": "", "arquivo": "", "inicio": 0, "etapa": ""}
@@ -409,6 +409,73 @@ def trocar_senha(d: SenhaIn, u: dict = Depends(usuario)):
     _valida_senha(d.nova)
     with con:
         con.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (_hash(d.nova), u["id"]))
+    return {"ok": True}
+
+
+# recuperar senha: link de uso unico enviado ao e-mail (login) do usuario pelo SMTP das Configuracoes
+TOKEN_SENHA_MIN = 60
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+class EsqueciIn(BaseModel):
+    login: str
+
+
+@app.post("/api/senha/esqueci")
+def esqueci_senha(d: EsqueciIn, request: Request):
+    """Responde igual exista ou nao o usuario, para nao revelar quais e-mails tem acesso."""
+    con = db.connect()
+    if not correio.configurado(con):
+        raise HTTPException(400, "A recuperação de senha por e-mail ainda não foi configurada. Procure o suporte.")
+    login = _norm_login(d.login)
+    if not _email_ok(login):
+        raise HTTPException(400, "Informe o e-mail usado para entrar no sistema")
+    r = con.execute("SELECT id, login FROM usuarios WHERE login=?", (login,)).fetchone()
+    agora = time.time()
+    # um pedido por minuto para o mesmo usuario (evita encher a caixa de entrada)
+    if r and not con.execute("SELECT 1 FROM senha_tokens WHERE usuario_id=? AND criado > ?",
+                             (r["id"], agora - 60)).fetchone():
+        token = secrets.token_urlsafe(32)
+        with con:
+            con.execute("DELETE FROM senha_tokens WHERE expira < ?", (agora,))
+            con.execute("INSERT INTO senha_tokens (token_hash, usuario_id, criado, expira) VALUES (?,?,?,?)",
+                        (_hash_token(token), r["id"], agora, agora + TOKEN_SENHA_MIN * 60))
+        link = f"{str(request.base_url).rstrip('/')}/?redefinir={token}"
+        texto = (f"Olá,\n\nRecebemos um pedido para redefinir a senha de {r['login']} no {NOME_SISTEMA}.\n\n"
+                 f"Para criar uma nova senha, abra o link abaixo (válido por {TOKEN_SENHA_MIN} minutos):\n{link}\n\n"
+                 "Se você não pediu, ignore este e-mail: a sua senha continua a mesma.")
+        html = (f"<p>Olá,</p><p>Recebemos um pedido para redefinir a senha de <b>{r['login']}</b> no {NOME_SISTEMA}.</p>"
+                f'<p><a href="{link}" style="display:inline-block;background:#0b5ed7;color:#fff;padding:10px 18px;'
+                f'border-radius:8px;text-decoration:none">Criar nova senha</a></p>'
+                f"<p>O link vale por {TOKEN_SENHA_MIN} minutos. Se você não pediu, ignore este e-mail: "
+                "a sua senha continua a mesma.</p>")
+        try:
+            correio.enviar(con, r["login"], f"Recuperar senha - {NOME_SISTEMA}", texto, html)
+        except RuntimeError as ex:
+            print(f"Recuperar senha de {r['login']}: {ex}")
+            raise HTTPException(502, "Não foi possível enviar o e-mail agora. Tente mais tarde ou procure o suporte.")
+    return {"ok": True}
+
+
+class RedefinirIn(BaseModel):
+    token: str
+    nova: str
+
+
+@app.post("/api/senha/redefinir")
+def redefinir_senha(d: RedefinirIn):
+    con = db.connect()
+    r = con.execute("SELECT usuario_id, expira FROM senha_tokens WHERE token_hash=?", (_hash_token(d.token),)).fetchone()
+    if not r or r["expira"] < time.time():
+        raise HTTPException(400, "Link de recuperação inválido ou expirado. Peça um novo em “Esqueci minha senha”.")
+    _valida_senha(d.nova)
+    with con:
+        con.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (_hash(d.nova), r["usuario_id"]))
+        con.execute("DELETE FROM sessoes WHERE usuario_id=?", (r["usuario_id"],))
+        con.execute("DELETE FROM senha_tokens WHERE usuario_id=?", (r["usuario_id"],))
     return {"ok": True}
 
 
@@ -1253,17 +1320,40 @@ def salvar_orcamento(eid: int, o: OrcIn, u: dict = Depends(admin)):
 @app.get("/api/config")
 def config(u: dict = Depends(admin)):
     con = db.connect()
-    return {r["chave"]: r["valor"] for r in con.execute("SELECT * FROM config")}
+    cfg = {**correio.PADRAO, **{r["chave"]: r["valor"] for r in con.execute("SELECT * FROM config")}}
+    cfg["smtp_senha_definida"] = bool(cfg.pop("smtp_senha", ""))  # a senha do e-mail nunca volta para a tela
+    return cfg
 
 
 @app.put("/api/config")
 def salvar_config(cfg: dict, u: dict = Depends(admin)):
+    """smtp_senha vazia mantem a senha guardada."""
+    cfg.pop("smtp_senha_definida", None)
+    if not str(cfg.get("smtp_senha", "x")).strip():
+        cfg.pop("smtp_senha")
     con = db.connect()
     with con:
         for k, v in cfg.items():
             con.execute("INSERT INTO config VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor",
                         (k, str(v)))
     return config(u)
+
+
+class TesteEmailIn(BaseModel):
+    para: str
+
+
+@app.post("/api/config/smtp/teste")
+def testar_smtp(d: TesteEmailIn, u: dict = Depends(admin)):
+    para = d.para.strip()
+    if not _email_ok(para):
+        raise HTTPException(400, "Informe um e-mail válido para o teste")
+    try:
+        correio.enviar(db.connect(), para, f"Teste de e-mail - {NOME_SISTEMA}",
+                       f"Este é um e-mail de teste do {NOME_SISTEMA}. A configuração de SMTP está funcionando.")
+    except RuntimeError as ex:
+        raise HTTPException(400, str(ex))
+    return {"ok": True}
 
 
 LOGO_TIPOS = {"image/png", "image/jpeg", "image/svg+xml", "image/webp"}

@@ -20,7 +20,7 @@ from reportlab.platypus import Paragraph
 
 from .pdf import _cabe
 from .servidores import MESES, abreviado, mes_ano
-from .util import norm_nome
+from .util import NOME_SISTEMA, norm_nome
 
 BRASAO = Path(__file__).parent / "modelos" / "brasao_sao_luis.png"
 LARG, ALT = A4
@@ -157,7 +157,7 @@ def frequencia(servidores: list[dict], ano: int, mes: int, feriados: dict[int, t
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"Registro individual de frequência - {mes_ano(ano, mes)}")
-    c.setAuthor("SIS SMPE")
+    c.setAuthor(NOME_SISTEMA)
     for s in servidores:
         _folha(c, s, ano, mes, feriados)
         c.showPage()
@@ -250,7 +250,7 @@ def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"Declaração de efetivo exercício - {s.get('nome', '')}")
-    c.setAuthor("SIS SMPE")
+    c.setAuthor(NOME_SISTEMA)
     _imagem(c, DECL_CABECALHO, (LARG - 210) / 2, 10, 210)
     y = 92
     c.setFont(FONTE, 9)
@@ -307,7 +307,7 @@ def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> by
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle("Etiquetas dos aniversariantes")
-    c.setAuthor("SIS SMPE")
+    c.setAuthor(NOME_SISTEMA)
     for i, s in enumerate(itens):
         if i and i % por_folha == 0:
             c.showPage()

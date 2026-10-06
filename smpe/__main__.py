@@ -34,7 +34,9 @@ def main() -> None:
     else:
         import uvicorn
 
-        print(f"SIS SMPE em http://{args.host}:{args.porta}")
+        from .util import NOME_SISTEMA
+
+        print(f"{NOME_SISTEMA} em http://{args.host}:{args.porta}")
         uvicorn.run("smpe.web:app", host=args.host, port=args.porta, log_level="warning")
 
 
