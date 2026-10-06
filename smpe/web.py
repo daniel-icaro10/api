@@ -443,7 +443,10 @@ def esqueci_senha(d: EsqueciIn, request: Request):
             con.execute("DELETE FROM senha_tokens WHERE expira < ?", (agora,))
             con.execute("INSERT INTO senha_tokens (token_hash, usuario_id, criado, expira) VALUES (?,?,?,?)",
                         (_hash_token(token), r["id"], agora, agora + TOKEN_SENHA_MIN * 60))
-        link = f"{str(request.base_url).rstrip('/')}/?redefinir={token}"
+        base = str(request.base_url).rstrip("/")
+        if request.headers.get("x-forwarded-proto") == "https":  # atras do proxy do Render/Apache
+            base = base.replace("http://", "https://", 1)
+        link = f"{base}/?redefinir={token}"
         texto = (f"Olá,\n\nRecebemos um pedido para redefinir a senha de {r['login']} no {NOME_SISTEMA}.\n\n"
                  f"Para criar uma nova senha, abra o link abaixo (válido por {TOKEN_SENHA_MIN} minutos):\n{link}\n\n"
                  "Se você não pediu, ignore este e-mail: a sua senha continua a mesma.")
