@@ -251,7 +251,7 @@ const ultimaEscola = () => {
 const ROUTES = {painel, migracao, escolas, remessas, critica, relatorios, orcamento, bases, busca, config, usuarios,
   servidores, frequencia, aniversariantes, feriados, decl_professor: () => declaracoes("professor"),
   decl_administrativo: () => declaracoes("administrativo")};
-const SO_ADMIN = new Set(["escolas", "orcamento", "bases", "config", "usuarios"]);
+const SO_ADMIN = new Set(["orcamento", "bases", "config", "usuarios"]);  // escolas: a instituicao ve a dela, so com as fichas
 const DO_RH = new Set(["servidores", "decl_professor", "decl_administrativo", "frequencia", "aniversariantes", "feriados"]);  // perfil RH (e o administrador)
 const SO_RH = new Set(["feriados"]);  // a instituicao usa o resto do modulo, so com os servidores dela
 const TITLES = {painel: "Painel", migracao: "Matriculados", escolas: "Cadastro de instituições", remessas: "Remessas SMTT", critica: "Criticar remessa",
@@ -728,38 +728,39 @@ async function previaRemessa(eid, ids) {
 // ------------------------------------------------------------------ escolas
 async function escolas() {
   await loadEscolas();
-  const [pn, cfg] = await Promise.all([api("/api/painel"), api("/api/config")]);
-  CFG_AVISO = parseInt(cfg.aviso_prazo_dias ?? "10", 10) || 0;
+  const adm = ehAdmin();  // a instituicao so ve a dela e so baixa as fichas (editar, prazo e bloqueio sao do administrador)
+  const [pn, cfg] = await Promise.all([api("/api/painel"), adm ? api("/api/config") : null]);
+  if (cfg) CFG_AVISO = parseInt(cfg.aviso_prazo_dias ?? "10", 10) || 0;
   const res = Object.fromEntries(pn.escolas.map(e => [e.id, e]));
-  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} instituições</h2><span class="spacer"></span>
-      <input id="fE" placeholder="Filtrar…" style="width:220px">${btnXls("escolas")}<button class="primary" id="novaEsc">Nova instituição</button></div>
-    <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th><th>Usuários</th><th>Situação</th><th></th></tr></thead>
+  $("#view").innerHTML = `<div class="card"><div class="card-h"><h2>${ESCOLAS.length} ${ESCOLAS.length === 1 ? "instituição" : "instituições"}</h2><span class="spacer"></span>
+      <input id="fE" placeholder="Filtrar…" style="width:220px">${btnXls("escolas")}${adm ? `<button class="primary" id="novaEsc">Nova instituição</button>` : ""}</div>
+    <div class="table-wrap" style="max-height:none"><table id="tbE"><thead><tr><th>ID</th><th>Instituição</th><th>Cód. SMTT</th><th>INEP</th><th>Vínculo GEDUC</th><th class="num">Alunos GEDUC</th>${adm ? "<th>Usuários</th>" : ""}<th>Situação</th><th></th></tr></thead>
     <tbody id="tbEBody"></tbody></table></div><div id="pgE"></div></div>`;
   const rowE = e => `<tr data-n="${esc(e.nome.toLowerCase())}"><td>${e.id}</td><td>${esc(e.nome)}</td><td class="mono">${esc(e.cod_smtt)}</td><td class="mono">${esc(e.inep)}</td>
       <td>${e.geduc_nome ? esc(e.geduc_nome) : `<span class="muted">mesmo nome</span>`}</td>
       <td class="num">${res[e.id]?.matriculados ? fmtN(res[e.id].matriculados) : `<span class="badge b-warn">0 — vincular</span>`}</td>
-      <td>${e.logins?.length ? e.logins.map(l => `<div>${esc(fmtLogin(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>
+      ${adm ? `<td>${e.logins?.length ? e.logins.map(l => `<div>${esc(fmtLogin(l))}</div>`).join("") : `<span class="badge b-mute">sem usuário</span>`}</td>` : ""}
       <td>${e.bloqueado ? `<span class="badge b-err" title="${esc(e.motivo_bloqueio)}">bloqueada</span><div class="muted">${esc(e.motivo_bloqueio)}</div>` : prazoBadge(e)}</td>
-      <td class="acoes"><div class="row"><button class="btn-sm" data-ed="${e.id}">Editar</button><button class="btn-dl btn-sm" data-fi="${e.id}">${icDl}Fichas</button>
-        <button class="btn-sm" data-pz="${e.id}">Prazo de uso</button>
-        <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button></div></td></tr>`;
+      <td class="acoes"><div class="row">${adm ? `<button class="btn-sm" data-ed="${e.id}">Editar</button>` : ""}<button class="btn-dl btn-sm" data-fi="${e.id}">${icDl}Fichas</button>
+        ${adm ? `<button class="btn-sm" data-pz="${e.id}">Prazo de uso</button>
+        <button data-bl="${e.id}" class="btn-sm ${e.bloqueado ? "" : "danger"}">${e.bloqueado ? "Desbloquear" : "Bloquear"}</button>` : ""}</div></td></tr>`;
   const filtradas = () => { const q = $("#fE").value.toLowerCase(); return ESCOLAS.filter(e => e.nome.toLowerCase().includes(q) || String(e.id) === q); };
   XLS.escolas = () => ({titulo: "Instituições", subtitulo: $("#fE").value && `Filtro: ${$("#fE").value}`,
     colunas: [["ID", "numero"], ["Instituição"], ["Cód. SMTT"], ["INEP"], ["CNPJ"], ["E-mail"], ["Vínculo GEDUC"], ["Alunos GEDUC", "numero"],
-      ["Usuários"], ["Representantes"], ["Cursos"], ["Situação"]],
+      ...(adm ? [["Usuários"]] : []), ["Representantes"], ["Cursos"], ["Situação"]],
     linhas: filtradas().map(e => [e.id, e.nome, e.cod_smtt, e.inep, fmtCNPJ(e.cnpj), e.email, e.geduc_nome || "mesmo nome",
-      res[e.id]?.matriculados || 0, (e.logins || []).map(fmtLogin).join("\n"),
+      res[e.id]?.matriculados || 0, ...(adm ? [(e.logins || []).map(fmtLogin).join("\n")] : []),
       (e.representantes || []).map(r => [r.nome, r.cargo, r.contato, r.email].filter(Boolean).join(" · ")).join("\n"),
       (e.cursos || []).map(c => `${c.curso} (grau ${c.grau})`).join("\n"),
       e.bloqueado ? "Bloqueada" + (e.motivo_bloqueio ? `: ${e.motivo_bloqueio}` : "") : prazoInfo(e).txt])});
   const renderE = () => {
     const pg = paginar("escolas", filtradas(), renderE);
-    $("#tbEBody").innerHTML = pg.itens.map(rowE).join("") || `<tr><td colspan="9" class="empty">Nenhuma instituição encontrada.</td></tr>`;
+    $("#tbEBody").innerHTML = pg.itens.map(rowE).join("") || `<tr><td colspan="${adm ? 9 : 8}" class="empty">Nenhuma instituição encontrada.</td></tr>`;
     $("#pgE").innerHTML = pg.html;
   };
   $("#fE").oninput = () => { resetPag("escolas"); renderE(); };
   renderE();
-  $("#novaEsc").onclick = () => editarEscola(null);
+  if (adm) $("#novaEsc").onclick = () => editarEscola(null);
   $("#tbE").onclick = ev => {
     const b = ev.target.closest("button"); if (!b) return;
     if (b.dataset.ed) editarEscola(+b.dataset.ed);
@@ -1125,15 +1126,15 @@ function renderCritica(r) {
 // ------------------------------------------------------------------ relatorios
 const RELS = {
   sem_cpf: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES SEM CPF", cols: ["LINHA", "NOME DO ESTUDANTE", "DATA NASC", "SEXO", "MÃE", "TURMA", "INFORME O CPF"],
-    row: (a, i) => [i, esc(a.aluno) + (a.divergente ? ' <small>(CPF divergente)</small>' : ""), fmtData(a.dt_nasc), a.sexo, esc(a.mae), esc(a.turma), `<span class="fill"></span>`],
+    nw: [1, 4], row: (a, i) => [i, esc(a.aluno) + (a.divergente ? ' <small class="obs">(CPF divergente)</small>' : ""), fmtData(a.dt_nasc), a.sexo, esc(a.mae), esc(a.turma), `<span class="fill"></span>`],
     xcols: [["Linha", "numero"], ["Nome do estudante"], ["Data nasc.", "data"], ["Sexo"], ["Mãe"], ["Turma"], ["Observação"], ["Informe o CPF"]],
     xrow: (a, i) => [i, a.aluno, a.dt_nasc, a.sexo, a.mae, a.turma, a.divergente ? "CPF divergente" : "", ""]},
   sem_mae: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES SEM MÃE", cols: ["LINHA", "NOME DO ESTUDANTE", "DATA NASC", "SEXO", "INFORME A MÃE", "TURMA", "CPF"],
-    row: (a, i) => [i, esc(a.aluno), fmtData(a.dt_nasc), a.sexo, `<span class="fill"></span>`, esc(a.turma), fmtCPF(a.cpf)],
+    nw: [1], row: (a, i) => [i, esc(a.aluno), fmtData(a.dt_nasc), a.sexo, `<span class="fill"></span>`, esc(a.turma), fmtCPF(a.cpf)],
     xcols: [["Linha", "numero"], ["Nome do estudante"], ["Data nasc.", "data"], ["Sexo"], ["Informe a mãe"], ["Turma"], ["CPF", "cpf"]],
     xrow: (a, i) => [i, a.aluno, a.dt_nasc, a.sexo, "", a.turma, a.cpf]},
   simplificada: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES", cols: ["LINHA", "NOME DO ESTUDANTE", "CPF", "DATA NASC", "MÃE"],
-    row: (a, i) => [i, esc(a.aluno), `<span class="mono">${a.cpf_mascarado || "—"}</span>`, fmtData(a.dt_nasc), esc(a.mae)],
+    nw: [1, 4], row: (a, i) => [i, esc(a.aluno), `<span class="mono">${a.cpf_mascarado || "—"}</span>`, fmtData(a.dt_nasc), esc(a.mae)],
     xcols: [["Linha", "numero"], ["Nome do estudante"], ["CPF"], ["Data nasc.", "data"], ["Mãe"]],
     xrow: (a, i) => [i, a.aluno, a.cpf_mascarado, a.dt_nasc, a.mae]},
 };
@@ -1151,10 +1152,11 @@ async function relatorios(eid, qs) {
   lembrarEscola(eid);
   const d = await api(`/api/escolas/${eid}/relatorio/${tipo}`), R = RELS[tipo], e = d.escola;
   XLS.relatorio = () => ({titulo: `${R.t} - ${e.nome}`, subtitulo: `Cód. SMTT ${e.cod_smtt || "—"}`, colunas: R.xcols, linhas: d.itens.map((a, i) => R.xrow(a, i + 1))});
-  $("#relDoc").innerHTML = `<div class="doc"><div class="doc-head"><img src="/api/logo" alt=""><h2>${R.t} - ${new Date().getFullYear()}</h2></div>
+  // nomes do estudante e da mae numa linha so: a folha sai em A4 paisagem (o @page some junto com a tela)
+  $("#relDoc").innerHTML = `<style>@page{size:A4 landscape;margin:10mm}</style><div class="doc rel"><div class="doc-head"><img src="/api/logo" alt=""><h2>${R.t} - ${new Date().getFullYear()}</h2></div>
     <div class="dmeta"><span><b>COD:</b> ${esc(e.cod_smtt)}</span><span><b>INSTITUIÇÃO:</b> ${esc(e.nome)}</span><span><b>DATA/HORA:</b> ${agora()}</span><span><b>TOTAL:</b> ${d.itens.length}</span></div>
-    ${d.itens.length ? `<table><thead><tr>${R.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>
-      ${d.itens.map((a, i) => `<tr>${R.row(a, i + 1).map(v => `<td>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+    ${d.itens.length ? `<div class="rel-wrap"><table><thead><tr>${R.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>
+      ${d.itens.map((a, i) => `<tr>${R.row(a, i + 1).map((v, j) => `<td${R.nw.includes(j) ? ' class="nw"' : ""}>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
       : `<p style="text-align:center">Nenhum estudante nesta situação.</p>`}
     ${tipo !== "simplificada" ? `<div class="note">Devolver preenchido à equipe responsável. As informações serão lançadas como correção no sistema.</div>` : ""}</div>`;
 }
@@ -1708,12 +1710,12 @@ async function aniversariantes() {
       <div><label>Mês</label><select id="aMes" style="max-width:160px">${MESES.map((m, i) => `<option value="${i + 1}" ${i + 1 === st.mes ? "selected" : ""}>${m}</option>`).join("")}</select></div>
       ${filtrosSrv(st, true)}</div>
     <div class="card-h"><span class="muted" id="nAniv"></span><span class="spacer"></span>
-      <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="13" value="0" style="width:64px"> etiqueta(s)</label>
+      <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="32" value="0" style="width:64px"> etiqueta(s)</label>
       <label class="row" style="margin:0;gap:6px"><input type="checkbox" id="aGuias" style="width:auto">contorno (papel comum)</label>
-      ${btnXls("aniv")}<button class="primary" id="aEtq">${icDl}Etiquetas em PDF</button></div>
+      ${btnXls("aniv")}<button class="btn-dl" id="aPainel" title="Cartaz A4 para o mural, com um quadro para colar cada etiqueta">${icDl}Painel para o mural</button><button class="primary" id="aEtq">${icDl}Etiquetas em PDF</button></div>
     <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Dia</th><th>Servidor</th><th>Na etiqueta</th><th>Cargo / função</th><th>Turno</th><th>Lotação</th><th class="num">Idade</th></tr></thead>
     <tbody id="tbA"></tbody></table></div>
-    <div class="card-b muted">Etiquetas A4 com 14 por folha (99 × 38,1 mm, como a Pimaco A4363/6182), na ordem do dia do aniversário.</div></div>`;
+    <div class="card-b muted">Etiquetas A4 com 33 por folha (63,5 × 25,4 mm, como a Pimaco A4356/6180), na ordem do dia do aniversário. O painel para o mural é um cartaz A4 com um quadro do tamanho da etiqueta para cada aniversariante (21 por folha).</div></div>`;
   const abrev = n => { const out = []; for (const p of n.split(/\s+/)) { out.push(p); if (out.filter(x => !["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x)).length === 2) break; }
     return out.map(x => ["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x) ? x.toLowerCase() : x[0] + x.slice(1).toLowerCase()).join(" "); };
   const idade = d => hoje.getFullYear() - +d.slice(0, 4);
@@ -1737,6 +1739,11 @@ async function aniversariantes() {
     const ids = lista().map(s => s.id);
     if (!ids.length) return toast("Nenhum aniversariante no filtro");
     baixarPdf("/api/servidores/etiquetas", {ids, pular: +$("#aPular").value || 0, guias: $("#aGuias").checked}, ev.currentTarget);
+  };
+  $("#aPainel").onclick = ev => {
+    const ids = lista().map(s => s.id);
+    if (!ids.length) return toast("Nenhum aniversariante no filtro");
+    baixarPdf("/api/servidores/painel-aniversariantes", {ids, mes: st.mes}, ev.currentTarget);
   };
   render();
 }

@@ -170,11 +170,14 @@ pre.linhas{background:var(--navy);color:#cfe0ff;border-radius:var(--radius-sm);p
 .doc tbody tr:nth-child(even){background:#f5f8fd}
 .doc tbody tr:hover{background:inherit}
 .doc .fill{display:inline-block;min-width:150px}
+.doc.rel{max-width:1180px}.doc .rel-wrap{overflow-x:auto}
+.doc td.nw{white-space:nowrap}.doc td.nw small.obs{display:block}
 .doc .note{font-size:12.5px;margin-top:18px;padding:12px 14px;border-left:3px solid var(--blue);background:var(--soft);border-radius:0 8px 8px 0}
 @media print{
   .side,.top,.no-print{display:none!important}
   body{background:#fff;display:block}.view{padding:0}.doc{border:0;padding:0;max-width:none;box-shadow:none}
   .doc th,.doc tbody tr{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .doc .rel-wrap{overflow:visible}.doc.rel td,.doc.rel th{font-size:10.5px;padding:5px 7px}.doc.rel thead{display:table-header-group}.doc.rel tr{break-inside:avoid}
 }
 @media (max-width:900px){
   .side{position:fixed;left:-270px;transition:left .2s;box-shadow:var(--shadow-lg)}.side.open{left:0}

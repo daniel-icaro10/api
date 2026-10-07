@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import correio, critica, db, exportar, fichas, importer, logic, pdf, servidores, servidores_pdf
 from .util import NOME_SISTEMA, chave_nome, cpf_valido, norm_cpf, norm_nome, sem_acento, so_digitos
@@ -1784,6 +1784,21 @@ def pdf_etiquetas(e: EtiquetasIn, u: dict = Depends(srv)):
     con = db.connect()
     lista = sorted(_selecionados(con, e.ids, u), key=lambda s: ((s["dt_nasc"] or "")[5:10], s["nome_norm"]))
     return _pdf(servidores_pdf.etiquetas(lista, e.pular, e.guias), "ETIQUETAS_ANIVERSARIANTES.pdf")
+
+
+class PainelIn(BaseModel):
+    ids: list[int]
+    mes: int = Field(ge=1, le=12)
+
+
+@app.post("/api/servidores/painel-aniversariantes")
+def pdf_painel(p: PainelIn, u: dict = Depends(srv)):
+    """Cartaz A4 do mural, com um quadro do tamanho da etiqueta para cada aniversariante (ordem do dia)."""
+    con = db.connect()
+    lista = sorted(_selecionados(con, p.ids, u), key=lambda s: ((s["dt_nasc"] or "")[5:10], s["nome_norm"]))
+    lotacoes = {s["lotacao"] for s in lista if s.get("lotacao")}
+    local = lotacoes.pop() if len(lotacoes) == 1 else ""  # o nome da escola so quando todos sao dela
+    return _pdf(servidores_pdf.painel(lista, p.mes, local), f"PAINEL_ANIVERSARIANTES_{sem_acento(servidores.MESES[p.mes - 1])}.pdf")
 
 
 # feriados e pontos facultativos (folha de frequencia)

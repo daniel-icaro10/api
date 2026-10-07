@@ -295,9 +295,38 @@ def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = 
 
 # ------------------------------------------------------------------ etiquetas dos aniversariantes
 
-# folha A4 com 14 etiquetas de 99,0 x 38,1 mm (Pimaco A4363 / 6182)
-ETQ = {"colunas": 2, "linhas": 7, "larg": 99.0 * mm, "alt": 38.1 * mm, "topo": 15.15 * mm, "esq": 4.65 * mm,
-       "vao": 2.7 * mm}
+# folha A4 com 33 etiquetas de 63,5 x 25,4 mm (Pimaco A4356 / 6180): 3 colunas x 11 linhas, sem vao entre as linhas
+ETQ = {"colunas": 3, "linhas": 11, "larg": 63.5 * mm, "alt": 25.4 * mm, "topo": 8.8 * mm, "esq": 7.25 * mm,
+       "vao": 2.5 * mm}
+
+
+def _dia_mes(s: dict) -> str:
+    try:
+        dn = date.fromisoformat((s.get("dt_nasc") or "")[:10])
+    except ValueError:
+        return ""
+    return f"{dn.day:02d}/{dn.month:02d}"
+
+
+def _etiqueta(c, s: dict, x: float, y: float):
+    """Uma etiqueta com o canto inferior esquerdo em (x, y): nome, cargo, turno, dia e lotacao."""
+    cx, larg, topo = x + ETQ["larg"] / 2, ETQ["larg"] - 12, y + ETQ["alt"]
+    nome, tam = _cabe(abreviado(s.get("nome", "")), larg, NEGRITO, 10.5)
+    c.setFont(NEGRITO, tam)
+    c.drawCentredString(cx, topo - 17, nome)
+    cargo, tam = _cabe(s.get("funcao") or s.get("cargo") or "", larg, FONTE, 7)
+    c.setFont(FONTE, tam)
+    c.drawCentredString(cx, topo - 27, cargo)
+    if s.get("turno"):
+        c.setFont(FONTE, 6.5)
+        c.drawCentredString(cx, topo - 35.5, f"Turno: {s['turno']}")
+    c.setFont(NEGRITO, 10)
+    c.setFillColor(VERMELHO)
+    c.drawCentredString(cx, y + 15, _dia_mes(s))
+    c.setFillColor(black)
+    lot, tam = _cabe(s.get("lotacao") or "", larg, FONTE, 6)
+    c.setFont(FONTE, tam)
+    c.drawCentredString(cx, y + 6, lot)
 
 
 def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> bytes:
@@ -317,35 +346,82 @@ def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> by
         y = ALT - ETQ["topo"] - (lin + 1) * ETQ["alt"]
         if guias:
             c.setStrokeColor(CINZA)
-            c.roundRect(x, y, ETQ["larg"], ETQ["alt"], 6)
+            c.roundRect(x, y, ETQ["larg"], ETQ["alt"], 5)
             c.setStrokeColor(black)
-        if not s:
-            continue
-        cx, larg = x + ETQ["larg"] / 2, ETQ["larg"] - 16
-        nome, tam = _cabe(abreviado(s.get("nome", "")), larg, NEGRITO, 15)
-        c.setFont(NEGRITO, tam)
-        c.drawCentredString(cx, y + ETQ["alt"] - 32, nome)
-        cargo, tam = _cabe(s.get("funcao") or s.get("cargo") or "", larg, FONTE, 8.5)
-        c.setFont(FONTE, tam)
-        c.drawCentredString(cx, y + ETQ["alt"] - 46, cargo)
-        if s.get("turno"):
-            c.setFont(FONTE, 8)
-            c.drawCentredString(cx, y + ETQ["alt"] - 57, f"Turno: {s['turno']}")
-        try:
-            dn = date.fromisoformat(s.get("dt_nasc", "")[:10])
-            niver = f"{dn.day:02d}/{dn.month:02d}"
-        except ValueError:
-            niver = ""
-        c.setFont(NEGRITO, 12)
-        c.setFillColor(VERMELHO)
-        c.drawCentredString(cx, y + 22, niver)
-        c.setFillColor(black)
-        lot, tam = _cabe(s.get("lotacao") or "", larg, FONTE, 7.5)
-        c.setFont(FONTE, tam)
-        c.drawCentredString(cx, y + 10, lot)
+        if s:
+            _etiqueta(c, s, x, y)
     if not itens:
         c.setFont(FONTE, 11)
         c.drawCentredString(LARG / 2, ALT / 2, "Nenhum aniversariante no filtro escolhido.")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+# cartaz A4 do mural: um quadro do tamanho da etiqueta para cada aniversariante, na ordem do dia
+AZUL = HexColor("#123e7c")
+PAINEL = {"colunas": 3, "linhas": 7, "vao_x": 2.5 * mm, "vao_y": 4.5 * mm, "topo": 62 * mm}
+CONFETES = [(18, 20, 2.2, "#f6c445"), (28, 42, 1.6, "#ff6b6b"), (40, 16, 1.4, "#7ed6a3"), (36, 31, 1.2, "#f6c445"),
+            (170, 33, 1.3, "#f6c445"), (172, 17, 2.0, "#ff6b6b"), (182, 42, 2.4, "#f6c445"), (194, 24, 1.5, "#7ed6a3")]  # x, y, raio (mm)
+
+
+def painel(servidores: list[dict], mes: int, titulo_local: str = "") -> bytes:
+    por_folha = PAINEL["colunas"] * PAINEL["linhas"]
+    folhas = [servidores[i:i + por_folha] for i in range(0, len(servidores), por_folha)] or [[]]
+    larg_grade = PAINEL["colunas"] * ETQ["larg"] + (PAINEL["colunas"] - 1) * PAINEL["vao_x"]
+    esq = (LARG - larg_grade) / 2
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setTitle(f"Painel dos aniversariantes - {MESES[mes - 1].capitalize()}")
+    c.setAuthor(NOME_SISTEMA)
+    for n, folha in enumerate(folhas):
+        if n:
+            c.showPage()
+        # faixa do titulo, com confetes
+        c.setFillColor(AZUL)
+        c.roundRect(esq, ALT - 52 * mm, larg_grade, 40 * mm, 10, stroke=0, fill=1)
+        for fx, fy, r, cor in CONFETES:
+            c.setFillColor(HexColor(cor))
+            c.circle(fx * mm, ALT - fy * mm, r * mm, stroke=0, fill=1)
+        c.setFillColor(HexColor("#ffffff"))
+        c.setFont(NEGRITO, 26)
+        c.drawCentredString(LARG / 2, ALT - 30 * mm, "ANIVERSARIANTES")
+        c.setFont(NEGRITO, 17)
+        c.setFillColor(HexColor("#f6c445"))
+        c.drawCentredString(LARG / 2, ALT - 40 * mm, f"DE {MESES[mes - 1]}")
+        if titulo_local:
+            t, tam = _cabe(titulo_local, 120 * mm, FONTE, 9.5)
+            c.setFillColor(HexColor("#dbe6f6"))
+            c.setFont(FONTE, tam)
+            c.drawCentredString(LARG / 2, ALT - 47.5 * mm, t)
+        c.setFillColor(black)
+        if not folha:
+            c.setFont(FONTE, 11)
+            c.drawCentredString(LARG / 2, ALT / 2, "Nenhum aniversariante no filtro escolhido.")
+        # quadros para colar as etiquetas (tracejados, com o dia em cinza para guiar a ordem)
+        c.setDash(3, 2)
+        c.setLineWidth(0.6)
+        for k, s in enumerate(folha):
+            col, lin = k % PAINEL["colunas"], k // PAINEL["colunas"]
+            x = esq + col * (ETQ["larg"] + PAINEL["vao_x"])
+            y = ALT - PAINEL["topo"] - lin * (ETQ["alt"] + PAINEL["vao_y"]) - ETQ["alt"]
+            c.setStrokeColor(HexColor("#9aa9bf"))
+            c.roundRect(x, y, ETQ["larg"], ETQ["alt"], 5)
+            c.setFillColor(HexColor("#c4cdd9"))
+            c.setFont(NEGRITO, 13)
+            c.drawCentredString(x + ETQ["larg"] / 2, y + ETQ["alt"] / 2 - 2, _dia_mes(s))
+            c.setFont(FONTE, 6.5)
+            c.drawCentredString(x + ETQ["larg"] / 2, y + 6, "cole a etiqueta aqui")
+        c.setDash()
+        c.setStrokeColor(black)
+        c.setFillColor(AZUL)
+        c.setFont(NEGRITO, 13)
+        c.drawCentredString(LARG / 2, 16 * mm, "Parabéns! Muitas felicidades e sucesso!")
+        if len(folhas) > 1:
+            c.setFont(FONTE, 8)
+            c.setFillColor(HexColor("#6b7a90"))
+            c.drawRightString(esq + larg_grade, 9 * mm, f"Folha {n + 1} de {len(folhas)}")
+        c.setFillColor(black)
     c.showPage()
     c.save()
     return buf.getvalue()
