@@ -318,8 +318,9 @@ def _etiqueta(c, s: dict, x: float, y: float):
     c.setFont(FONTE, tam)
     c.drawCentredString(cx, topo - 27, cargo)
     if s.get("turno"):
-        c.setFont(FONTE, 6.5)
-        c.drawCentredString(cx, topo - 35.5, f"Turno: {s['turno']}")
+        turno, tam = _cabe(f"Turno: {s['turno']}", larg, FONTE, 6.5)
+        c.setFont(FONTE, tam)
+        c.drawCentredString(cx, topo - 35.5, turno)
     c.setFont(NEGRITO, 10)
     c.setFillColor(VERMELHO)
     c.drawCentredString(cx, y + 15, _dia_mes(s))
