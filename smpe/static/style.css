@@ -118,6 +118,7 @@ td b{font-weight:600;color:var(--ink)}
 .alert{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:13px;border:1px solid transparent}.alert a{font-weight:600}
 .alert.warn{background:var(--warn-soft);color:var(--warn);border-color:#fde2bd}
 .tb-conf td:first-child{min-width:230px}
+dialog.largo{width:min(1180px,96vw)}.tb-nd td.nw{white-space:nowrap}
 .badge.quebra{white-space:normal;max-width:190px}
 .alert.conf{display:flex;gap:14px;align-items:center;justify-content:space-between}
 .alert.info{background:var(--blue-soft);color:var(--blue-2);border-color:var(--blue-soft-2)}
@@ -177,7 +178,7 @@ pre.linhas{background:var(--navy);color:#cfe0ff;border-radius:var(--radius-sm);p
   .side,.top,.no-print{display:none!important}
   body{background:#fff;display:block}.view{padding:0}.doc{border:0;padding:0;max-width:none;box-shadow:none}
   .doc th,.doc tbody tr{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .doc .rel-wrap{overflow:visible}.doc.rel td,.doc.rel th{font-size:10.5px;padding:5px 7px}.doc.rel thead{display:table-header-group}.doc.rel tr{break-inside:avoid}
+  .doc .rel-wrap{overflow:visible}.doc.rel td,.doc.rel th{font-size:10.5px;padding:5px 7px}.doc.rel thead{display:table-header-group}.doc.rel tr{break-inside:avoid}.doc.rel .fill{min-width:110px}
 }
 @media (max-width:900px){
   .side{position:fixed;left:-270px;transition:left .2s;box-shadow:var(--shadow-lg)}.side.open{left:0}

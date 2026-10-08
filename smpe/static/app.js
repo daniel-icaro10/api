@@ -442,38 +442,48 @@ async function conferenciaStatus(eid) {
       <button class="btn-sm" id="verConf">Ver diferenças</button></div>`;
   $("#verConf").onclick = () => modalConferencia(eid, c);
 }
+// CPF na conferencia: "DIVERGENTE" quando GEDUC, Censo e SMTT discordam; no sistema, destaca o que nao bate com o do status
+const cpfTxt = v => v === "DIVERGENTE" ? "divergente" : fmtCPF(v) || "";
+const so11 = v => (v || "").replace(/\D/g, "");
+const cpfCel = (v, outro) => v === "DIVERGENTE" ? `<span class="badge b-err">divergente</span>`
+  : !v ? `<span class="muted">sem CPF</span>`
+  : so11(outro) && so11(outro) !== so11(v) ? `<span class="mono cpf-div" title="Diferente do CPF no Alunos por status">${fmtCPF(v)}</span>`
+  : `<span class="mono">${fmtCPF(v)}</span>`;
 function modalConferencia(eid, c) {
   const cadastrados = new Set();
+  $("#modal").classList.add("largo");
+  $("#modal").addEventListener("close", () => $("#modal").classList.remove("largo"), {once: true});
   XLS.conf_status = () => ({titulo: "Só no Alunos por status", subtitulo: MIG?.d.escola.nome,
     colunas: [["Aluno"], ["Nascimento", "data"], ["Turma"], ["Turno"], ["Mãe"], ["CPF", "cpf"], ["Situação"], ["No GEDUC em"]],
     linhas: c.so_status.map(s => [s.aluno, s.nascimento, s.turma, s.turno, s.mae, s.cpf, s.situacao, s.outra_escola || "não está no GEDUC"])});
   XLS.conf_sistema = () => ({titulo: "Só no sistema", subtitulo: MIG?.d.escola.nome,
-    colunas: [["ID aluno"], ["Aluno"], ["Nascimento", "data"], ["Turma"], ["Turno"], ["Origem"]],
-    linhas: c.so_sistema.map(a => [a.id_aluno, a.aluno, a.dt_nasc, a.turma, a.turno, a.manual ? "Cadastro individual" : "GEDUC"])});
+    colunas: [["ID aluno"], ["Aluno"], ["Nascimento", "data"], ["CPF"], ["Turma"], ["Turno"], ["Origem"]],
+    linhas: c.so_sistema.map(a => [a.id_aluno, a.aluno, a.dt_nasc, cpfTxt(a.cpf), a.turma, a.turno, a.manual ? "Cadastro individual" : "GEDUC"])});
   const linhaS = (s, i) => `<tr><td><b>${esc(s.aluno)}</b><div class="muted">${esc(s.mae) || "—"}</div></td><td>${fmtData(s.nascimento)}</td>
       <td>${esc(s.turma)}<div class="muted">${esc(s.turno)}</div></td><td class="mono">${fmtCPF(s.cpf) || "—"}</td>
       <td>${s.outra_escola ? `<span class="badge b-warn quebra" title="Pode ser transferência">GEDUC: ${esc(s.outra_escola)}</span>` : `<span class="badge b-mute">não está no GEDUC</span>`}</td>
       <td class="acoes">${cadastrados.has(i) ? `<span class="badge b-ok">cadastrado</span>` : `<button class="btn-sm" data-cad="${i}" title="Cria o aluno no cadastro individual com os dados do Alunos por status">Cadastrar</button>`}</td></tr>`;
   const nd = c.nome_diferente || [], corrigidos = new Set();
   XLS.conf_nome = () => ({titulo: "Mesmo aluno com nome diferente", subtitulo: MIG?.d.escola.nome,
-    colunas: [["Nascimento", "data"], ["Nome no Alunos por status"], ["Nome no sistema"], ["ID aluno"], ["Semelhança", "pct"]],
-    linhas: nd.map(x => [x.status.nascimento, x.status.aluno, x.sistema.aluno, x.sistema.id_aluno, x.similaridade])});
+    colunas: [["Nascimento", "data"], ["Nome no Alunos por status"], ["CPF no Alunos por status"], ["Nome no sistema"], ["CPF no sistema"], ["ID aluno"], ["Semelhança", "pct"]],
+    linhas: nd.map(x => [x.status.nascimento, x.status.aluno, cpfTxt(x.status.cpf), x.sistema.aluno, cpfTxt(x.sistema.cpf), x.sistema.id_aluno, x.similaridade])});
   const render = () => modal(`<div class="mh"><h2>Conferência com o Alunos por status</h2><span class="spacer"></span><button onclick="closeModal()">×</button></div>
     <div class="mb">
       <p class="muted" style="margin-top:0">O cruzamento é pelo nome e pela data de nascimento (o ID_ALUNO do Alunos por status é de outra numeração). Diferenças comuns: aluno matriculado depois da extração do GEDUC, transferência ou nome escrito de outro jeito.</p>
       ${nd.length ? `<div class="row" style="margin-bottom:8px"><h3 style="margin:0">Mesmo aluno com o nome escrito diferente (${fmtN(nd.length)})</h3><span class="spacer"></span>${btnXls("conf_nome")}</div>
-        <table><thead><tr><th>Nascimento</th><th>No Alunos por status</th><th>No sistema</th><th></th></tr></thead><tbody>
-        ${nd.map((x, i) => `<tr><td>${fmtData(x.status.nascimento)}</td><td><b>${esc(x.status.aluno)}</b></td><td>${esc(x.sistema.aluno)}</td>
+        <table class="tb-nd"><thead><tr><th>Nascimento</th><th>No Alunos por status</th><th>CPF (status)</th><th>No sistema</th><th>CPF (sistema)</th><th></th></tr></thead><tbody>
+        ${nd.map((x, i) => `<tr><td>${fmtData(x.status.nascimento)}</td><td class="nw"><b>${esc(x.status.aluno)}</b></td><td>${cpfCel(x.status.cpf)}</td>
+          <td class="nw">${esc(x.sistema.aluno)}</td><td>${cpfCel(x.sistema.cpf, x.status.cpf)}</td>
           <td class="acoes"><div class="row">${x.sistema.manual ? "" : corrigidos.has(i) ? `<span class="badge b-ok">nome corrigido</span>` : `<button class="btn-sm" data-nome="${i}" title="Grava como correção do aluno o nome como está no Alunos por status">Usar este nome</button>`}<button class="btn-sm" data-al="${esc(x.sistema.id_aluno)}">Abrir</button></div></td></tr>`).join("")}</tbody></table>
         <p class="muted">Não cadastre esses alunos de novo: já estão no sistema. Confira qual grafia está certa e, se for a do Alunos por status, clique em “Usar este nome”.</p>` : ""}
       <div class="row" style="margin-bottom:8px"><h3 style="margin:0">Só no Alunos por status (${fmtN(c.so_status.length)})</h3><span class="spacer"></span>${c.so_status.length ? btnXls("conf_status") : ""}</div>
       ${c.so_status.length ? `<table class="tb-conf"><thead><tr><th>Aluno / mãe</th><th>Nasc.</th><th>Turma</th><th>CPF</th><th>GEDUC</th><th></th></tr></thead><tbody>${c.so_status.map(linhaS).join("")}</tbody></table>
         <p class="muted">“Cadastrar” cria o aluno no <b>cadastro individual</b> desta instituição com os dados do Alunos por status. Confira antes os que aparecem no GEDUC de outra instituição (podem ser transferências).</p>` : `<p class="muted">Nenhum.</p>`}
       ${(c.fora || []).length ? `<div class="row" style="margin:18px 0 8px"><h3 style="margin:0">Fora da contagem (${fmtN(c.fora.length)})</h3></div>
-        <table><thead><tr><th>Aluno</th><th>Nasc.</th><th>Turma</th><th>Origem</th></tr></thead><tbody>${c.fora.map(a => `<tr class="click" data-al="${esc(a.id_aluno)}"><td><b>${esc(a.aluno)}</b></td><td>${fmtData(a.dt_nasc)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td><td>${a.manual ? "Cadastro individual" : "GEDUC"}</td></tr>`).join("")}</tbody></table>
+        <table><thead><tr><th>Aluno</th><th>Nasc.</th><th>CPF</th><th>Turma</th><th>Origem</th></tr></thead><tbody>${c.fora.map(a => `<tr class="click" data-al="${esc(a.id_aluno)}"><td><b>${esc(a.aluno)}</b></td><td>${fmtData(a.dt_nasc)}</td><td>${cpfCel(a.cpf)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td><td>${a.manual ? "Cadastro individual" : "GEDUC"}</td></tr>`).join("")}</tbody></table>
         <p class="muted">Não estão no Alunos por status atualizado em ${fmtDH(c.pelo_status)} (ou estão repetidos) e não contam como matriculados.</p>` : ""}
       <div class="row" style="margin:18px 0 8px"><h3 style="margin:0">Só no sistema (${fmtN(c.so_sistema.length)})</h3><span class="spacer"></span>${c.so_sistema.length ? btnXls("conf_sistema") : ""}</div>
-      ${c.so_sistema.length ? `<table><thead><tr><th>Aluno</th><th>Nasc.</th><th>Turma</th><th>Origem</th></tr></thead><tbody>${c.so_sistema.map(a => `<tr class="click" data-al="${esc(a.id_aluno)}"><td><b>${esc(a.aluno)}</b></td><td>${fmtData(a.dt_nasc)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td><td>${a.manual ? "Cadastro individual" : "GEDUC"}</td></tr>`).join("")}</tbody></table>
+      ${c.so_sistema.length ? `<table><thead><tr><th>Aluno</th><th>Nasc.</th><th>CPF</th><th>Turma</th><th>Origem</th></tr></thead><tbody>${c.so_sistema.map(a => `<tr class="click" data-al="${esc(a.id_aluno)}"><td><b>${esc(a.aluno)}</b></td><td>${fmtData(a.dt_nasc)}</td><td>${cpfCel(a.cpf)}</td><td>${esc(a.turma)}<div class="muted">${esc(a.turno)}</div></td><td>${a.manual ? "Cadastro individual" : "GEDUC"}</td></tr>`).join("")}</tbody></table>
         <p class="muted">Podem ter saído da instituição ou estar com o nome ou a data de nascimento diferente no Alunos por status. Clique para abrir o aluno.</p>` : `<p class="muted">Nenhum.</p>`}
     </div>
     <div class="mf"><button onclick="closeModal()">Fechar</button></div>`);

@@ -267,7 +267,7 @@ def conferencia_status(con, escola, bases: Bases | None = None) -> dict:
         nd = [x for x in nd if x[1]["id_aluno"] not in ids]
     campos_s = ("aluno", "nascimento", "turma", "turno", "sexo", "mae", "pai", "cpf", "telefone", "matricula", "endereco",
                 "numero", "bairro", "situacao")
-    campos_a = ("id_aluno", "aluno", "dt_nasc", "turma", "turno", "manual")
+    campos_a = ("id_aluno", "aluno", "dt_nasc", "turma", "turno", "manual", "cpf")
 
     def outra_escola(s):
         outra = [r["escola"] for r in con.execute("SELECT escola, dt_nasc FROM geduc WHERE nome_norm=?", (s["nome_norm"],))
