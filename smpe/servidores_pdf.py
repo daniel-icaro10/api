@@ -323,11 +323,11 @@ def _etiqueta(c, s: dict, x: float, y: float):
         c.drawCentredString(cx, topo - 30, turno)
     c.setFont(NEGRITO, 17)  # dia e mes em destaque (pedido da escola)
     c.setFillColor(VERMELHO)
-    c.drawCentredString(cx, y + 13, _dia_mes(s))
+    c.drawCentredString(cx, y + 14, _dia_mes(s))
     c.setFillColor(black)
     lot, tam = _cabe(s.get("lotacao") or "", larg, FONTE, 5.5)
     c.setFont(FONTE, tam)
-    c.drawCentredString(cx, y + 4.5, lot)
+    c.drawCentredString(cx, y + 5.5, lot)
 
 
 def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> bytes:

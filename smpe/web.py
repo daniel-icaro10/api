@@ -1791,8 +1791,9 @@ PAINEL_MURAL = Path(__file__).parent / "modelos" / "painel_aniversariantes.pdf"
 
 @app.get("/api/servidores/painel-aniversariantes")
 def painel_mural(u: dict = Depends(srv)):
-    """Painel do mural enviado pela escola: cartaz de 16 folhas A4 (4 x 4) com um quadro por mes, onde as
-    etiquetas A4356 sao coladas em 2 colunas (cabem 8 por mes)."""
+    """Painel do mural enviado pela escola: cartaz de 16 folhas A4 (4 x 4) com um quadro por mes de ~190 x 100-115 mm.
+    As etiquetas A4356 entram em 2 colunas: 3 linhas (6 por mes) com folga; a 4a linha fica justa e, de abril a junho
+    e de outubro a dezembro, passa um pouco da borda."""
     return FileResponse(PAINEL_MURAL, media_type="application/pdf", filename="PAINEL_ANIVERSARIANTES.pdf")
 
 
