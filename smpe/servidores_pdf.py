@@ -295,9 +295,18 @@ def declaracao(s: dict, escola: dict | None, hoje: date, docente: bool | None = 
 
 # ------------------------------------------------------------------ etiquetas dos aniversariantes
 
-# folha A4 com 33 etiquetas de 63,5 x 25,4 mm (Pimaco A4356 / 6180): 3 colunas x 11 linhas, sem vao entre as linhas
-ETQ = {"colunas": 3, "linhas": 11, "larg": 63.5 * mm, "alt": 25.4 * mm, "topo": 8.8 * mm, "esq": 7.25 * mm,
-       "vao": 2.5 * mm}
+# dois modelos de folha A4, sem vao entre as linhas; a escola escolhe pelo numero de aniversariantes do mes.
+# nome, cargo, turno: (fonte, distancia do topo); dia, lotacao: (fonte, distancia da base), em pontos
+ETIQUETAS = {
+    # escola grande: 33 por folha, 63,5 x 25,4 mm (Pimaco A4356 / 6180), 3 colunas x 11 linhas
+    "3col": {"colunas": 3, "linhas": 11, "larg": 63.5 * mm, "alt": 25.4 * mm, "topo": 8.8 * mm, "esq": 7.25 * mm,
+             "vao": 2.5 * mm, "nome": (10.5, 14), "cargo": (6.5, 22.5), "turno": (6, 30), "dia": (17, 14),
+             "lotacao": (5.5, 5.5)},
+    # escola menor: 14 por folha, 99 x 38,1 mm (Pimaco A4363 / 6182), 2 colunas x 7 linhas
+    "2col": {"colunas": 2, "linhas": 7, "larg": 99.0 * mm, "alt": 38.1 * mm, "topo": 15.15 * mm, "esq": 4.65 * mm,
+             "vao": 2.7 * mm, "nome": (15, 25), "cargo": (8.5, 38), "turno": (8, 49), "dia": (22, 21),
+             "lotacao": (7.5, 8)},
+}
 
 
 def _dia_mes(s: dict) -> str:
@@ -308,31 +317,29 @@ def _dia_mes(s: dict) -> str:
     return f"{dn.day:02d}/{dn.month:02d}"
 
 
-def _etiqueta(c, s: dict, x: float, y: float):
-    """Uma etiqueta com o canto inferior esquerdo em (x, y): nome, cargo, turno, dia e lotacao."""
-    cx, larg, topo = x + ETQ["larg"] / 2, ETQ["larg"] - 12, y + ETQ["alt"]
-    nome, tam = _cabe(abreviado(s.get("nome", "")), larg, NEGRITO, 10.5)
-    c.setFont(NEGRITO, tam)
-    c.drawCentredString(cx, topo - 14, nome)
-    cargo, tam = _cabe(s.get("funcao") or s.get("cargo") or "", larg, FONTE, 6.5)
-    c.setFont(FONTE, tam)
-    c.drawCentredString(cx, topo - 22.5, cargo)
+def _etiqueta(c, s: dict, x: float, y: float, m: dict):
+    """Uma etiqueta do modelo m com o canto inferior esquerdo em (x, y): nome, cargo, turno, dia e lotacao."""
+    cx, larg, topo = x + m["larg"] / 2, m["larg"] - 12, y + m["alt"]
+
+    def linha(texto, fonte, chave, y_texto):
+        texto, tam = _cabe(texto, larg, fonte, m[chave][0])
+        c.setFont(fonte, tam)
+        c.drawCentredString(cx, y_texto, texto)
+
+    linha(abreviado(s.get("nome", "")), NEGRITO, "nome", topo - m["nome"][1])
+    linha(s.get("funcao") or s.get("cargo") or "", FONTE, "cargo", topo - m["cargo"][1])
     if s.get("turno"):
-        turno, tam = _cabe(f"Turno: {s['turno']}", larg, FONTE, 6)
-        c.setFont(FONTE, tam)
-        c.drawCentredString(cx, topo - 30, turno)
-    c.setFont(NEGRITO, 17)  # dia e mes em destaque (pedido da escola)
+        linha(f"Turno: {s['turno']}", FONTE, "turno", topo - m["turno"][1])
     c.setFillColor(VERMELHO)
-    c.drawCentredString(cx, y + 14, _dia_mes(s))
+    linha(_dia_mes(s), NEGRITO, "dia", y + m["dia"][1])  # dia e mes em destaque (pedido da escola)
     c.setFillColor(black)
-    lot, tam = _cabe(s.get("lotacao") or "", larg, FONTE, 5.5)
-    c.setFont(FONTE, tam)
-    c.drawCentredString(cx, y + 5.5, lot)
+    linha(s.get("lotacao") or "", FONTE, "lotacao", y + m["lotacao"][1])
 
 
-def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> bytes:
+def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False, modelo: str = "3col") -> bytes:
     """pular: etiquetas ja usadas no inicio da primeira folha. guias: contorno para conferir em papel comum."""
-    por_folha = ETQ["colunas"] * ETQ["linhas"]
+    m = ETIQUETAS[modelo]
+    por_folha = m["colunas"] * m["linhas"]
     itens = [None] * max(0, min(pular, por_folha - 1)) + list(servidores)
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
@@ -342,15 +349,15 @@ def etiquetas(servidores: list[dict], pular: int = 0, guias: bool = False) -> by
         if i and i % por_folha == 0:
             c.showPage()
         k = i % por_folha
-        col, lin = k % ETQ["colunas"], k // ETQ["colunas"]
-        x = ETQ["esq"] + col * (ETQ["larg"] + ETQ["vao"])
-        y = ALT - ETQ["topo"] - (lin + 1) * ETQ["alt"]
+        col, lin = k % m["colunas"], k // m["colunas"]
+        x = m["esq"] + col * (m["larg"] + m["vao"])
+        y = ALT - m["topo"] - (lin + 1) * m["alt"]
         if guias:
             c.setStrokeColor(CINZA)
-            c.roundRect(x, y, ETQ["larg"], ETQ["alt"], 5)
+            c.roundRect(x, y, m["larg"], m["alt"], 5)
             c.setStrokeColor(black)
         if s:
-            _etiqueta(c, s, x, y)
+            _etiqueta(c, s, x, y, m)
     if not itens:
         c.setFont(FONTE, 11)
         c.drawCentredString(LARG / 2, ALT / 2, "Nenhum aniversariante no filtro escolhido.")

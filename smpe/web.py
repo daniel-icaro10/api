@@ -1776,14 +1776,17 @@ class EtiquetasIn(BaseModel):
     ids: list[int]
     pular: int = 0
     guias: bool = False
+    modelo: str = "3col"  # 3col: 33 por folha (escola grande); 2col: 14 por folha (escola menor)
 
 
 @app.post("/api/servidores/etiquetas")
 def pdf_etiquetas(e: EtiquetasIn, u: dict = Depends(srv)):
     """Etiquetas na ordem do dia do aniversario."""
+    if e.modelo not in servidores_pdf.ETIQUETAS:
+        raise HTTPException(400, "Modelo de etiqueta inválido")
     con = db.connect()
     lista = sorted(_selecionados(con, e.ids, u), key=lambda s: ((s["dt_nasc"] or "")[5:10], s["nome_norm"]))
-    return _pdf(servidores_pdf.etiquetas(lista, e.pular, e.guias), "ETIQUETAS_ANIVERSARIANTES.pdf")
+    return _pdf(servidores_pdf.etiquetas(lista, e.pular, e.guias, e.modelo), "ETIQUETAS_ANIVERSARIANTES.pdf")
 
 
 PAINEL_MURAL = Path(__file__).parent / "modelos" / "painel_aniversariantes.pdf"
@@ -1792,8 +1795,8 @@ PAINEL_MURAL = Path(__file__).parent / "modelos" / "painel_aniversariantes.pdf"
 @app.get("/api/servidores/painel-aniversariantes")
 def painel_mural(u: dict = Depends(srv)):
     """Painel do mural enviado pela escola: cartaz de 16 folhas A4 (4 x 4) com um quadro por mes de ~190 x 100-115 mm.
-    As etiquetas A4356 entram em 2 colunas: 3 linhas (6 por mes) com folga; a 4a linha fica justa e, de abril a junho
-    e de outubro a dezembro, passa um pouco da borda."""
+    Cabem 3 x 4 etiquetas do modelo de 3 colunas (12 por mes) ou 2 x 3 do de 2 colunas (6 por mes), encostando na
+    borda nos quadros mais estreitos ou mais baixos."""
     return FileResponse(PAINEL_MURAL, media_type="application/pdf", filename="PAINEL_ANIVERSARIANTES.pdf")
 
 

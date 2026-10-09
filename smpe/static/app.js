@@ -1713,6 +1713,9 @@ async function frequencia() {
 }
 
 const ST_ANIV = {status: "ATIVO", mes: new Date().getMonth() + 1};
+// folhas de etiqueta (as mesmas de servidores_pdf.ETIQUETAS); a ultima escolhida fica lembrada neste navegador
+const ETQ_MODELOS = {"3col": {nome: "3 colunas · 33 por folha (escola grande)", folha: 33}, "2col": {nome: "2 colunas · 14 por folha (escola menor)", folha: 14}};
+const modeloEtq = () => { try { const m = localStorage.getItem("smpe.etq"); if (ETQ_MODELOS[m]) return m; } catch {} return "3col"; };
 async function aniversariantes() {
   await loadServidores();
   const st = ST_ANIV, hoje = new Date();
@@ -1720,12 +1723,14 @@ async function aniversariantes() {
       <div><label>Mês</label><select id="aMes" style="max-width:160px">${MESES.map((m, i) => `<option value="${i + 1}" ${i + 1 === st.mes ? "selected" : ""}>${m}</option>`).join("")}</select></div>
       ${filtrosSrv(st, true)}</div>
     <div class="card-h"><span class="muted" id="nAniv"></span><span class="spacer"></span>
-      <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="32" value="0" style="width:64px"> etiqueta(s)</label>
+      <label class="row" style="margin:0;gap:6px" title="3 colunas para escola com muitos aniversariantes, 2 colunas para escola menor">Etiqueta
+        <select id="aModelo" style="width:auto">${Object.entries(ETQ_MODELOS).map(([k, m]) => `<option value="${k}" ${k === modeloEtq() ? "selected" : ""}>${m.nome}</option>`).join("")}</select></label>
+      <label class="row" style="margin:0;gap:6px" title="Etiquetas já usadas no início da primeira folha">Pular <input id="aPular" type="number" min="0" max="${ETQ_MODELOS[modeloEtq()].folha - 1}" value="0" style="width:64px"> etiqueta(s)</label>
       <label class="row" style="margin:0;gap:6px"><input type="checkbox" id="aGuias" style="width:auto">contorno (papel comum)</label>
-      ${btnXls("aniv")}<button class="btn-dl" id="aPainel" title="Cartaz de 16 folhas A4 com um quadro por mês para colar as etiquetas (2 colunas: 6 por mês com folga)">${icDl}Painel para o mural</button><button class="primary" id="aEtq">${icDl}Etiquetas em PDF</button></div>
+      ${btnXls("aniv")}<button class="btn-dl" id="aPainel" title="Cartaz de 16 folhas A4 com um quadro por mês para colar as etiquetas">${icDl}Painel para o mural</button><button class="primary" id="aEtq">${icDl}Etiquetas em PDF</button></div>
     <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Dia</th><th>Servidor</th><th>Na etiqueta</th><th>Cargo / função</th><th>Turno</th><th>Lotação</th><th class="num">Idade</th></tr></thead>
     <tbody id="tbA"></tbody></table></div>
-    <div class="card-b muted">Etiquetas A4 com 33 por folha (63,5 × 25,4 mm, como a Pimaco A4356/6180), na ordem do dia do aniversário. O painel para o mural tem 16 folhas A4 (imprima em tamanho real e monte 4 × 4); cada mês recebe as etiquetas em 2 colunas: 6 por mês com folga, e uma 4ª linha (8 por mês) fica justa, passando um pouco da borda de abril a junho e de outubro a dezembro.</div></div>`;
+    <div class="card-b muted">Etiquetas na ordem do dia do aniversário, em folha A4: <b>3 colunas</b> com 33 por folha (63,5 × 25,4 mm, Pimaco A4356/6180), para escola com muitos aniversariantes, ou <b>2 colunas</b> com 14 por folha (99 × 38,1 mm, Pimaco A4363/6182), para escola menor. O painel para o mural tem 16 folhas A4 (imprima em tamanho real e monte 4 × 4); cada mês recebe até 12 etiquetas de 3 colunas (3 × 4) ou até 6 de 2 colunas (2 × 3).</div></div>`;
   const abrev = n => { const out = []; for (const p of n.split(/\s+/)) { out.push(p); if (out.filter(x => !["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x)).length === 2) break; }
     return out.map(x => ["DA", "DE", "DO", "DAS", "DOS", "E", "D"].includes(x) ? x.toLowerCase() : x[0] + x.slice(1).toLowerCase()).join(" "); };
   const idade = d => hoje.getFullYear() - +d.slice(0, 4);
@@ -1748,7 +1753,12 @@ async function aniversariantes() {
   $("#aEtq").onclick = ev => {
     const ids = lista().map(s => s.id);
     if (!ids.length) return toast("Nenhum aniversariante no filtro");
-    baixarPdf("/api/servidores/etiquetas", {ids, pular: +$("#aPular").value || 0, guias: $("#aGuias").checked}, ev.currentTarget);
+    baixarPdf("/api/servidores/etiquetas", {ids, pular: +$("#aPular").value || 0, guias: $("#aGuias").checked, modelo: $("#aModelo").value}, ev.currentTarget);
+  };
+  $("#aModelo").onchange = ev => {
+    try { localStorage.setItem("smpe.etq", ev.target.value); } catch {}
+    const max = ETQ_MODELOS[ev.target.value].folha - 1;
+    $("#aPular").max = max; if (+$("#aPular").value > max) $("#aPular").value = max;
   };
   $("#aPainel").onclick = ev => baixarPdf("/api/servidores/painel-aniversariantes", null, ev.currentTarget);
   render();
