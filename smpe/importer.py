@@ -320,6 +320,13 @@ def save(con, base: str, recs: list[dict], arquivo: str) -> int:
                                ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cod_smtt=excluded.cod_smtt,
                                inep=excluded.inep""",
                             (int(r["id"]), r["nome"], r.get("cod_smtt", ""), r.get("inep", "")))
+        elif base == "status_alunos" and all(norm_nome(r.get("escola")) for r in recs):
+            # o arquivo costuma ser de uma instituicao so: troca apenas as que vieram nele, as outras ficam como estao
+            alvo = {norm_nome(r["escola"]) for r in recs}
+            antigos = [(r["id"],) for r in con.execute("SELECT id, escola FROM status_alunos")
+                       if norm_nome(r["escola"]) in alvo]
+            con.executemany("DELETE FROM status_alunos WHERE id=?", antigos)
+            inserir(con, base, recs)
         else:
             con.execute(f"DELETE FROM {base}")
             inserir(con, base, recs)
