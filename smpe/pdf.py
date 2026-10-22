@@ -1,5 +1,6 @@
 """PDF da remessa: "Relacao simplificada de estudantes", no layout do relatorio oficial da SMTT
-(cabecalho da Central de Atendimento ao Estudante, com a logo do sistema no lugar da logo da Prefeitura)."""
+(cabecalho da Central de Atendimento ao Estudante, com a logo do sistema no lugar da logo da Prefeitura).
+A versao do mural da escola e a mesma relacao, so com o CPF mascarado (LGPD)."""
 import hashlib
 import io
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from .critica import decodificar, parse_linha
-from .util import NOME_SISTEMA, fmt_cpf
+from .util import NOME_SISTEMA, fmt_cpf, mascara_cpf
 
 SAO_LUIS = timezone(timedelta(hours=-3))  # sem horario de verao
 AZUL = HexColor("#1f3b73")
@@ -27,7 +28,7 @@ ALT_LINHA = 14.2
 FONTE, FONTE_N = "Helvetica", "Helvetica-Bold"
 
 
-def alunos_do_txt(conteudo: bytes) -> list[dict]:
+def alunos_do_txt(conteudo: bytes, mascarar: bool = False) -> list[dict]:
     """Registros do arquivo de remessa (o que de fato foi enviado a SMTT), em ordem alfabetica."""
     texto, _ = decodificar(bytes(conteudo))
     out = []
@@ -37,7 +38,7 @@ def alunos_do_txt(conteudo: bytes) -> list[dict]:
             continue
         c = {k: v.strip() for k, v in parse_linha(linha).items()}
         d = c["DT_NASCIMENTO"]
-        out.append({"nome": c["NOME_ESTUDANTE"], "cpf": fmt_cpf(c["CPF"]), "mae": c["MAE"],
+        out.append({"nome": c["NOME_ESTUDANTE"], "cpf": mascara_cpf(c["CPF"]) if mascarar else fmt_cpf(c["CPF"]), "mae": c["MAE"],
                     "nasc": f"{d[:2]}/{d[2:4]}/{d[4:]}" if len(d) == 8 else d})
     return sorted(out, key=lambda a: a["nome"])
 
@@ -81,8 +82,9 @@ def _logo(c, img, x: float, y_topo: float, max_w: float = 150, max_h: float = 44
     c.drawImage(img, x, y_topo - h * esc, w * esc, h * esc, mask="auto")
 
 
-def gerar(lote: dict, cod_instituicao: str, logo: bytes | None, agora: datetime | None = None) -> bytes:
-    alunos = alunos_do_txt(lote["conteudo"])
+def gerar(lote: dict, cod_instituicao: str, logo: bytes | None, agora: datetime | None = None,
+          mascarar: bool = False) -> bytes:
+    alunos = alunos_do_txt(lote["conteudo"], mascarar)
     agora = agora or datetime.now(SAO_LUIS)
     codigo = codigo_verificacao(lote["conteudo"])
     alt_pag = A4[1]

@@ -1232,13 +1232,14 @@ def ficha_smtt(eid: int, tipo: str, rep: int | None = None, u: dict = Depends(us
 
 
 @app.get("/api/lotes/{lid}/pdf")
-def pdf_lote(lid: int, u: dict = Depends(usuario)):
-    """Relacao simplificada dos estudantes da remessa (com CPF), no layout do relatorio oficial."""
+def pdf_lote(lid: int, mascarado: bool = False, u: dict = Depends(usuario)):
+    """Relacao simplificada dos estudantes da remessa, no layout do relatorio oficial. Com mascarado=1 sai a
+    mesma relacao so com o CPF mascarado, para fixar no mural da escola (LGPD)."""
     con = db.connect()
     r = dict(_lote(con, lid, u))
     e = con.execute("SELECT cod_smtt FROM escolas WHERE id=?", (r["escola_id"],)).fetchone()
-    conteudo = pdf.gerar(r, (e["cod_smtt"] if e else "") or "", _logo_bytes(con)[1])
-    nome = Path(r["arquivo"]).stem + ".pdf"
+    conteudo = pdf.gerar(r, (e["cod_smtt"] if e else "") or "", _logo_bytes(con)[1], mascarar=mascarado)
+    nome = Path(r["arquivo"]).stem + ("_MURAL" if mascarado else "") + ".pdf"
     return Response(conteudo, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
@@ -1342,7 +1343,7 @@ def excluir_final(fid: int, u: dict = Depends(usuario)):
 
 @app.get("/api/escolas/{eid}/relatorio/{tipo}")
 def relatorio(eid: int, tipo: str, u: dict = Depends(usuario)):
-    if tipo not in ("sem_cpf", "sem_mae", "simplificada"):
+    if tipo not in ("sem_cpf", "sem_mae"):
         raise HTTPException(400)
     con = db.connect()
     e = _escola(con, eid, u)

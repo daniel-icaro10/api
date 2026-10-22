@@ -38,7 +38,7 @@ Para importar pela linha de comando: `python -m smpe importar "C:\...\SIS SMPE 2
 | CAD_ESCOLA | Instituições: cadastro em abas. **Dados cadastrais** (código SMTT, INEP, CNPJ, e-mail, curso padrão, vínculo GEDUC), **Representantes** (um ou mais: nome, CPF, cargo, contato e e-mail) e **Cursos** (um ou mais: curso, grau, séries e turnos). Também tem acesso e bloqueio |
 | ESCOLA (filtro avançado + colunas AG:AO) | Matriculado: cruzamento GEDUC × Censo × SMTT × Status e CPF consolidado |
 | Botões CPF divergente / com CPF / sem CPF / duplicado / mãe não informada | Abas de filtro do Matriculado |
-| REL_SEM_CPF / REL_SEM_MAE / REL_SIMPLIFICADA | Relatórios para imprimir (o simplificado mostra o CPF mascarado) |
+| REL_SEM_CPF / REL_SEM_MAE / REL_SIMPLIFICADA | Relatórios para imprimir. O simplificado (mural da escola) é a mesma relação do PDF da remessa, só com o CPF mascarado (LGPD): Remessas → **PDF mural** |
 | ALUNO + ENTRADA + NUM.CARACT | Remessa SMTT: arquivo `INST_<cód>_REM_<nº>.txt` em UTF-8 com BOM, 21 campos, 375 colunas |
 | Relação simplificada de estudantes (relatório oficial da SMTT) | Remessas → **Baixar PDF**: nome, CPF, nascimento e mãe de cada aluno da remessa, no layout oficial, com a logo do sistema e o código de verificação (SHA-1 do TXT) no rodapé |
 | AlunoCriticaUtf8.exe (validador oficial SMPE) | Criticar remessa: mesmas críticas de 0 a 17 e regras A a C, com relatório `CRITICA_*.txt`, mais a crítica 18 (mãe com nome e sobrenome) |

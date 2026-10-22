@@ -1038,7 +1038,7 @@ async function remessas(_, qs) {
   XLS.remessas = () => ({titulo: "Remessas SMTT", colunas: [["#", "numero"], ["Instituição"], ["Gerada em", "datahora"], ["Alunos", "numero"], ["Arquivo"]],
     linhas: ls.map(l => [l.id, l.escola, l.criado_em, l.n_alunos, l.arquivo])});
   const rowL = l => `<tr><td>${l.id}</td><td>${esc(l.escola)}</td><td>${fmtDH(l.criado_em)}</td><td class="num">${fmtN(l.n_alunos)}</td>
-      <td class="mono">${esc(l.arquivo)}</td><td class="acoes"><div class="row"><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/arquivo">${icDl}TXT</a><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/pdf">${icDl}PDF</a><a class="btn btn-sm" href="#/critica?lote=${l.id}">Criticar</a><button class="btn-sm" data-ver="${l.id}">Alunos</button><button class="btn-sm danger" data-del="${l.id}">Excluir</button></div></td></tr>`;
+      <td class="mono">${esc(l.arquivo)}</td><td class="acoes"><div class="row"><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/arquivo">${icDl}TXT</a><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/pdf">${icDl}PDF</a><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/pdf?mascarado=1" title="Mesma relação da remessa com o CPF mascarado, para o mural da escola">${icDl}PDF mural</a><a class="btn btn-sm" href="#/critica?lote=${l.id}">Criticar</a><button class="btn-sm" data-ver="${l.id}">Alunos</button><button class="btn-sm danger" data-del="${l.id}">Excluir</button></div></td></tr>`;
   const renderL = () => { const pg = paginar("remessas", ls, renderL); if ($("#tbLBody")) { $("#tbLBody").innerHTML = pg.itens.map(rowL).join(""); $("#pgL").innerHTML = pg.html; } };
   renderL();
   const finais = async () => {
@@ -1143,23 +1143,30 @@ const RELS = {
     nw: [1], row: (a, i) => [i, esc(a.aluno), fmtData(a.dt_nasc), a.sexo, `<span class="fill"></span>`, esc(a.turma), fmtCPF(a.cpf)],
     xcols: [["Linha", "numero"], ["Nome do estudante"], ["Data nasc.", "data"], ["Sexo"], ["Informe a mãe"], ["Turma"], ["CPF", "cpf"]],
     xrow: (a, i) => [i, a.aluno, a.dt_nasc, a.sexo, "", a.turma, a.cpf]},
-  simplificada: {t: "RELAÇÃO SIMPLIFICADA DE ESTUDANTES", cols: ["LINHA", "NOME DO ESTUDANTE", "CPF", "DATA NASC", "MÃE"],
-    nw: [1, 4], row: (a, i) => [i, esc(a.aluno), `<span class="mono">${a.cpf_mascarado || "—"}</span>`, fmtData(a.dt_nasc), esc(a.mae)],
-    xcols: [["Linha", "numero"], ["Nome do estudante"], ["CPF"], ["Data nasc.", "data"], ["Mãe"]],
-    xrow: (a, i) => [i, a.aluno, a.cpf_mascarado, a.dt_nasc, a.mae]},
 };
+// relacao do mural: a mesma relacao (PDF) de cada remessa, so com o CPF mascarado (LGPD)
+async function relMural(eid) {
+  const ls = await api("/api/lotes?escola_id=" + eid);
+  $("#relDoc").innerHTML = `<div class="card"><div class="card-h"><h2>Relação simplificada para o mural (CPF mascarado)</h2></div>
+    <div class="card-b"><p class="muted" style="margin-top:0">É a mesma relação do PDF da remessa enviada à SMTT; a única diferença é o CPF mascarado, por conta da LGPD, para fixar no mural da escola.</p>
+    ${ls.length ? `<div class="table-wrap" style="max-height:none"><table><thead><tr><th>#</th><th>Gerada em</th><th class="num">Alunos</th><th>Arquivo</th><th></th></tr></thead><tbody>
+      ${ls.map(l => `<tr><td>${l.id}</td><td>${fmtDH(l.criado_em)}</td><td class="num">${fmtN(l.n_alunos)}</td><td class="mono">${esc(l.arquivo)}</td>
+        <td class="acoes"><a class="btn-dl btn-sm" href="/api/lotes/${l.id}/pdf?mascarado=1">${icDl}PDF mural</a></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">Nenhuma remessa gerada para esta instituição.</div>`}</div></div>`;
+}
 async function relatorios(eid, qs) {
   eid = eid || ultimaEscola();
   const tipo = qs.get("tipo") || "sem_cpf";
   $("#view").innerHTML = `<div class="row no-print" style="margin-bottom:14px"><div style="width:420px">${escolaSelect("selEscRel", eid)}</div>
       <div class="tabs">${Object.entries({sem_cpf: "Sem CPF", sem_mae: "Sem mãe", simplificada: "Simplificada (CPF mascarado)"}).map(([k, l]) =>
         `<button class="tab ${k === tipo ? "active" : ""}" data-t="${k}">${l}</button>`).join("")}</div>
-      <span class="spacer"></span>${eid ? `<button type="button" class="btn-dl" id="btnFichas">${icDl}Fichas SMTT</button>${btnXls("relatorio")}` : ""}<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button></div><div id="relDoc"></div>`;
+      <span class="spacer"></span>${eid ? `<button type="button" class="btn-dl" id="btnFichas">${icDl}Fichas SMTT</button>${tipo !== "simplificada" ? btnXls("relatorio") : ""}` : ""}${tipo !== "simplificada" ? `<button class="primary" onclick="print()" ${eid ? "" : "disabled"}>Imprimir</button>` : ""}</div><div id="relDoc"></div>`;
   if ($("#btnFichas")) $("#btnFichas").onclick = () => fichasModal(eid);
   $("#selEscRel").onchange = ev => location.hash = `#/relatorios/${ev.target.value}?tipo=${tipo}`;
   $$(".tabs .tab").forEach(b => b.onclick = () => location.hash = `#/relatorios/${eid}?tipo=${b.dataset.t}`);
   if (!eid) { $("#relDoc").innerHTML = `<div class="empty">Selecione uma instituição.</div>`; return; }
   lembrarEscola(eid);
+  if (tipo === "simplificada") return relMural(eid);
   const d = await api(`/api/escolas/${eid}/relatorio/${tipo}`), R = RELS[tipo], e = d.escola;
   XLS.relatorio = () => ({titulo: `${R.t} - ${e.nome}`, subtitulo: `Cód. SMTT ${e.cod_smtt || "—"}`, colunas: R.xcols, linhas: d.itens.map((a, i) => R.xrow(a, i + 1))});
   // nomes do estudante e da mae numa linha so: a folha sai em A4 paisagem (o @page some junto com a tela)
@@ -1168,7 +1175,7 @@ async function relatorios(eid, qs) {
     ${d.itens.length ? `<div class="rel-wrap"><table><thead><tr>${R.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>
       ${d.itens.map((a, i) => `<tr>${R.row(a, i + 1).map((v, j) => `<td${R.nw.includes(j) ? ' class="nw"' : ""}>${v ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
       : `<p style="text-align:center">Nenhum estudante nesta situação.</p>`}
-    ${tipo !== "simplificada" ? `<div class="note">Devolver preenchido à equipe responsável. As informações serão lançadas como correção no sistema.</div>` : ""}</div>`;
+    <div class="note">Devolver preenchido à equipe responsável. As informações serão lançadas como correção no sistema.</div></div>`;
 }
 
 // ------------------------------------------------------------------ orcamento

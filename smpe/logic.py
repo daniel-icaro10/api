@@ -6,7 +6,7 @@ from datetime import datetime
 
 from . import db
 from .critica import LAYOUT, LEGENDA, TAM_LINHA, criticar_campos
-from .util import chave_nome, cpf_valido, mascara_cpf, nome_completo, norm_cpf, norm_nome, sem_acento, so_digitos
+from .util import chave_nome, cpf_valido, nome_completo, norm_cpf, norm_nome, sem_acento, so_digitos
 
 DIVERGENTE = "DIVERGENTE"
 
@@ -468,11 +468,8 @@ def orcamento(con, escola, res: dict | None = None) -> dict:
 def relatorio(alunos: list[dict], tipo: str) -> list[dict]:
     if tipo == "sem_cpf":
         sel = [a for a in alunos if "sem_cpf" in a["pendencias"] or "divergente" in a["pendencias"]]
-    elif tipo == "sem_mae":
+    else:  # sem_mae (a relacao do mural, com CPF mascarado, sai da propria remessa: pdf.gerar(mascarar=True))
         sel = [a for a in alunos if {"sem_mae", "mae_incompleta"} & set(a["pendencias"])]
-    else:
-        sel = alunos
     return [{"aluno": a["aluno"], "dt_nasc": a["dt_nasc"], "sexo": (a["genero"] or "")[:1], "mae": a["mae"],
              "turma": a["turma"], "cpf": a["cpf"] if a["cpf"] != DIVERGENTE else "",
-             "cpf_mascarado": mascara_cpf(a["cpf"]) if a["cpf"] != DIVERGENTE else "",
              "divergente": a["cpf"] == DIVERGENTE} for a in sorted(sel, key=lambda x: x["nome_norm"])]
